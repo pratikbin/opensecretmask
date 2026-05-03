@@ -89,6 +89,69 @@ func TestInstall_DryRun(t *testing.T) {
 	require.Contains(t, out.String(), "opensecretmask")
 }
 
+func TestResolveSettingsPath_MutuallyExclusive(t *testing.T) {
+	_, err := resolveSettingsPath(installOpts{global: true, project: true})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "mutually exclusive")
+}
+
+func TestResolveSettingsPath_GlobalFlag(t *testing.T) {
+	t.Setenv("HOME", "/tmp/fake-home-resolveSettings")
+	path, err := resolveSettingsPath(installOpts{global: true})
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join("/tmp/fake-home-resolveSettings", ".claude", "settings.json"), path)
+}
+
+func TestResolveSettingsPath_DefaultProject(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	cwd, _ := os.Getwd()
+	defer os.Chdir(cwd)
+	require.NoError(t, os.Chdir(dir))
+
+	path, err := resolveSettingsPath(installOpts{})
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(dir, ".claude", "settings.json"), path)
+}
+
+func TestLoadSettings_MissingFile(t *testing.T) {
+	dir := t.TempDir()
+	out, err := loadSettings(filepath.Join(dir, "nonexistent.json"))
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	require.Empty(t, out)
+}
+
+func TestLoadSettings_EmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "empty.json")
+	require.NoError(t, os.WriteFile(p, []byte{}, 0o644))
+	out, err := loadSettings(p)
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	require.Empty(t, out)
+}
+
+func TestLoadSettings_MalformedJSON(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bad.json")
+	require.NoError(t, os.WriteFile(p, []byte("{not json"), 0o644))
+	_, err := loadSettings(p)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "parse")
+	require.Contains(t, err.Error(), p)
+}
+
+func TestLoadSettings_NullJSON(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "null.json")
+	require.NoError(t, os.WriteFile(p, []byte("null"), 0o644))
+	out, err := loadSettings(p)
+	require.NoError(t, err)
+	require.NotNil(t, out, "null JSON must be normalized to empty map, not nil")
+	require.Empty(t, out)
+}
+
 func TestUninstall_LeavesUserHookIntact(t *testing.T) {
 	dir := t.TempDir()
 	cwd, _ := os.Getwd()
