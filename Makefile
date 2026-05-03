@@ -1,8 +1,12 @@
-.PHONY: build test lint vet sec fmt clean
+.PHONY: build test test-integration test-all lint vet sec fmt clean
 build:
 	go build -trimpath -ldflags="-s -w" -o bin/osm ./cmd/osm
 test:
 	go test -race -count=1 ./...
+test-integration:
+	go test -race -count=1 -tags=integration ./tests/integration/...
+test-all:
+	go test -race -count=1 -tags=integration ./...
 lint:
 	golangci-lint run ./...
 vet:
