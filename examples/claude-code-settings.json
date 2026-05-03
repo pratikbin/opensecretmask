@@ -1,0 +1,50 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osm hook --harness=claudecode posttooluse",
+            "description": "opensecretmask"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|Bash|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osm hook --harness=claudecode pretooluse",
+            "description": "opensecretmask"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osm hook --harness=claudecode userpromptsubmit",
+            "description": "opensecretmask"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osm hook --harness=claudecode sessionstart",
+            "description": "opensecretmask"
+          }
+        ]
+      }
+    ]
+  }
+}

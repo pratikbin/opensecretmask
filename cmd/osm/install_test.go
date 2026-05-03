@@ -1,0 +1,125 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestInstall_FreshProject(t *testing.T) {
+	dir := t.TempDir()
+	cwd, _ := os.Getwd()
+	defer os.Chdir(cwd)
+	require.NoError(t, os.Chdir(dir))
+
+	root := newRootCmd()
+	root.SetArgs([]string{"install", "claude-code", "--project"})
+	out := &bytes.Buffer{}
+	root.SetOut(out)
+	root.SetErr(out)
+	require.NoError(t, root.Execute())
+
+	data, err := os.ReadFile(filepath.Join(dir, ".claude", "settings.json"))
+	require.NoError(t, err)
+	var s map[string]any
+	require.NoError(t, json.Unmarshal(data, &s))
+	hooks := s["hooks"].(map[string]any)
+	require.Len(t, hooks, 4) // PostToolUse, PreToolUse, UserPromptSubmit, SessionStart
+}
+
+func TestInstall_PreservesUserHook(t *testing.T) {
+	dir := t.TempDir()
+	cwd, _ := os.Getwd()
+	defer os.Chdir(cwd)
+	require.NoError(t, os.Chdir(dir))
+
+	settingsPath := filepath.Join(dir, ".claude", "settings.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(settingsPath), 0o755))
+	pre := `{"hooks":{"PostToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo user","description":"user-hook"}]}]}}`
+	require.NoError(t, os.WriteFile(settingsPath, []byte(pre), 0o644))
+
+	root := newRootCmd()
+	root.SetArgs([]string{"install", "claude-code", "--project"})
+	require.NoError(t, root.Execute())
+
+	data, err := os.ReadFile(settingsPath)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "user-hook")
+	require.Contains(t, string(data), "opensecretmask")
+}
+
+func TestInstall_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	cwd, _ := os.Getwd()
+	defer os.Chdir(cwd)
+	require.NoError(t, os.Chdir(dir))
+
+	for i := 0; i < 2; i++ {
+		root := newRootCmd()
+		root.SetArgs([]string{"install", "claude-code", "--project"})
+		require.NoError(t, root.Execute())
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".claude", "settings.json"))
+	require.NoError(t, err)
+	var s map[string]any
+	require.NoError(t, json.Unmarshal(data, &s))
+	hooks := s["hooks"].(map[string]any)
+	pte := hooks["PostToolUse"].([]any)
+	require.Len(t, pte, 1) // not duplicated
+}
+
+func TestInstall_DryRun(t *testing.T) {
+	dir := t.TempDir()
+	cwd, _ := os.Getwd()
+	defer os.Chdir(cwd)
+	require.NoError(t, os.Chdir(dir))
+
+	root := newRootCmd()
+	root.SetArgs([]string{"install", "claude-code", "--project", "--dry-run"})
+	out := &bytes.Buffer{}
+	root.SetOut(out)
+	require.NoError(t, root.Execute())
+
+	_, err := os.Stat(filepath.Join(dir, ".claude", "settings.json"))
+	require.True(t, os.IsNotExist(err))
+	require.Contains(t, out.String(), "opensecretmask")
+}
+
+func TestUninstall_LeavesUserHookIntact(t *testing.T) {
+	dir := t.TempDir()
+	cwd, _ := os.Getwd()
+	defer os.Chdir(cwd)
+	require.NoError(t, os.Chdir(dir))
+
+	rootI := newRootCmd()
+	rootI.SetArgs([]string{"install", "claude-code", "--project"})
+	require.NoError(t, rootI.Execute())
+
+	settingsPath := filepath.Join(dir, ".claude", "settings.json")
+	data, _ := os.ReadFile(settingsPath)
+	var s map[string]any
+	require.NoError(t, json.Unmarshal(data, &s))
+	hooks := s["hooks"].(map[string]any)
+	pte := hooks["PostToolUse"].([]any)
+	pte = append(pte, map[string]any{
+		"matcher": "Bash",
+		"hooks": []any{map[string]any{
+			"type": "command", "command": "echo user", "description": "user-hook",
+		}},
+	})
+	hooks["PostToolUse"] = pte
+	out, _ := json.MarshalIndent(s, "", "  ")
+	require.NoError(t, os.WriteFile(settingsPath, out, 0o644))
+
+	rootU := newRootCmd()
+	rootU.SetArgs([]string{"uninstall", "claude-code", "--project"})
+	require.NoError(t, rootU.Execute())
+
+	data, _ = os.ReadFile(settingsPath)
+	require.Contains(t, string(data), "user-hook")
+	require.NotContains(t, string(data), "opensecretmask")
+}

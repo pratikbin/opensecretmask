@@ -23,6 +23,7 @@ func newRootCmd() *cobra.Command {
 		newScanCmd(),
 		newHookCmd(),
 		newInstallCmd(),
+		newUninstallCmd(),
 		newAddCmd(),
 		newAllowCmd(),
 		newStatusCmd(),
