@@ -149,11 +149,36 @@ performance bounds are documented in
 ## Development
 
 ```bash
-make build          # ./bin/osm
-make test           # go test -race -count=1 ./...
+make build              # ./bin/osm
+make test               # unit suite, race + count=1
+make test-integration   # integration suite under //go:build integration
+make test-all           # both suites
 go vet ./...
-golangci-lint run   # CI runs this; local optional
+golangci-lint run       # CI runs this; local optional
+
+# fuzz targets (each has inline seeds; run as long as you like)
+go test -fuzz=^FuzzMaskUnmask$              -fuzztime=30s ./internal/core/transformer/...
+go test -fuzz=^FuzzBashGate$                -fuzztime=30s ./internal/harness/claudecode/...
+go test -fuzz=^FuzzScanner_StreamRobustness$ -fuzztime=30s ./internal/core/detector/...
+
+# benchmarks
+go test -bench=. -benchmem -run=^$ ./cmd/osm/... ./internal/core/...
 ```
+
+**Test infrastructure highlights**
+
+- `tests/integration/` is gated by `//go:build integration` so the unit
+  suite stays fast; the integration matrix exercises every event ×
+  tool × direction pairing through the real `osm` binary.
+- Race tests in `internal/core/engine/` hammer `MaskText` and
+  `PreloadEnv` under contention with `-race -count=10` to catch
+  regressions in the lock-protected write path.
+- `goleak.VerifyTestMain` is installed in `engine` and `claudecode`
+  as a defensive tripwire — neither package spawns goroutines today,
+  but any future leak fails the suite immediately.
+- Known bugs (see `CLAUDE.md` "Known issues") have regression markers
+  in `*/known_bugs_test.go` files, gated by `t.Skip`. Removing the
+  skip line is the contract for "this bug is fixed".
 
 CI (`.github/workflows/ci.yml`) runs vet, race-tests, build, lint, and
 gosec on Linux + macOS across Go 1.25.x and 1.26.x. Releases are cut by
