@@ -7,3 +7,6 @@ coverage.txt
 .vscode/
 .DS_Store
 .tmp.*
+.env
+.env.local
+tests/e2e/bin/

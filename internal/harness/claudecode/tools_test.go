@@ -7,7 +7,7 @@ import (
 )
 
 func TestPostToolUseFields(t *testing.T) {
-	require.Equal(t, [][]string{{"content"}}, postToolUseFields("Read"))
+	require.Equal(t, [][]string{{"file", "content"}, {"content"}}, postToolUseFields("Read"))
 	require.Equal(t, [][]string{{"stdout"}, {"stderr"}}, postToolUseFields("Bash"))
 	require.Equal(t, [][]string{{"matches"}}, postToolUseFields("Grep"))
 	require.Equal(t, [][]string{{"files"}}, postToolUseFields("Glob"))

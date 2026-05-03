@@ -3,7 +3,9 @@ package claudecode
 func postToolUseFields(toolName string) [][]string {
 	switch toolName {
 	case "Read":
-		return [][]string{{"content"}}
+		// claude-code 2.x wraps Read response as { file: { content: ... } };
+		// the legacy { content: ... } shape is kept for harness backward compat.
+		return [][]string{{"file", "content"}, {"content"}}
 	case "Bash":
 		return [][]string{{"stdout"}, {"stderr"}}
 	case "Grep":
