@@ -3,6 +3,7 @@ module github.com/pratikbin/opensecretmask
 go 1.26.2
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/gofrs/flock v0.13.0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/crypto v0.50.0
