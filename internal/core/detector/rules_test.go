@@ -2,14 +2,20 @@ package detector
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
+func repeat(s string, n int) string { return strings.Repeat(s, n) }
+
 func TestBuiltinRules_Count(t *testing.T) {
 	rules := BuiltinRules()
-	require.GreaterOrEqual(t, len(rules), 18, "need at least 18 builtin rules per plan")
+	// env-import and entropy-high removed: their patterns matched any 12+/24+
+	// char identifier and over-masked Go symbols, env var names, model strings.
+	// 17 original prefix-anchored rules + 18 infra/SaaS additions = 35.
+	require.GreaterOrEqual(t, len(rules), 30)
 }
 
 func TestBuiltinRules_PositiveSamples(t *testing.T) {
@@ -29,8 +35,24 @@ func TestBuiltinRules_PositiveSamples(t *testing.T) {
 		"db-conn-string":         "postgres://user:p%40ssw0rd@host:5432/dbname",
 		"bearer-token-url":       "https://api.example.com/v1?access_token=AbCdEf0123456789xyz",
 		"generic-bearer-header":  "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
-		"env-import":             "AbCdEf012345_-.~ZyXwVu",
-		"entropy-high":           "AbCdEfGhIjKlMnOpQrStUvWxYz",
+		"gcp-api-key":            "AIzaSyA-AbCdEfGhIjKlMnOpQrStUvWxYz12345",
+		"openai-key-project":     "sk-proj-AbCdEfGhIjKlMnOpQrSt-Uv_Wx",
+		"vault-token":            "hvs.CAESIBcDEfGhIjKlMnOpQrStUvWx",
+		"terraform-cloud":        "n9p9XYJ4tlIPwf.atlasv1." + repeat("A", 60),
+		"digitalocean-token":     "dop_v1_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"sendgrid-key":           "SG.AbCdEfGhIjKlMnOpQrStUv.AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhIj",
+		"twilio-account-sid":     "AC0123456789abcdef0123456789abcdef",
+		"newrelic-user-key":      "NRAK-ABCDEFGHIJKLMNOPQRSTUVWXY12",
+		"sentry-dsn":             "https://0123456789abcdef0123456789abcdef@o1.ingest.sentry.io/1234567",
+		"npm-token":              "npm_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789Ab",
+		"docker-hub-pat":         "dckr_pat_AbCdEfGhIjKlMnOpQrStUvWxYz0",
+		"pypi-token":             "pypi-AgEIcHlwaS5vcmcAbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhIjKlMn",
+		"atlassian-api-token":    "ATATT" + repeat("A", 180),
+		"linear-api-key":         "lin_api_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCd",
+		"notion-secret":          "secret_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhI",
+		"groq-key":               "gsk_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhIjKlMnOpQr",
+		"huggingface-token":      "hf_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789",
+		"postman-key":            "PMAK-0123456789abcdef01234567-0123456789abcdef0123456789abcdef0123",
 	}
 	rules := BuiltinRules()
 	byID := map[string]int{}

@@ -42,7 +42,9 @@ func newHookCmd() *cobra.Command {
 			if err != nil {
 				return emitParseFailure(cmd.OutOrStdout(), err)
 			}
-			req.EventName = event
+			if req.EventName == "" {
+				req.EventName = event
+			}
 
 			ctx := cmd.Context()
 			if ctx == nil {
@@ -100,7 +102,7 @@ func bootstrapEngine() (*engine.Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	ent := detector.NewEntropyScanner(cfg.Detector.Entropy.Threshold, cfg.Detector.Entropy.MinLength)
+	ent := detector.NewEntropyScannerEnabled(cfg.Detector.Entropy.Enabled, cfg.Detector.Entropy.Threshold, cfg.Detector.Entropy.MinLength)
 	regValues := make([]string, 0, len(secs.Secrets))
 	for _, e := range secs.Secrets {
 		regValues = append(regValues, e.Value)
@@ -118,6 +120,15 @@ func runMask(ctx context.Context, eng *engine.Engine, adp harness.Adapter, req *
 	for _, t := range req.Targets {
 		masked, _, err := eng.MaskText(ctx, req.SessionID, req.Harness, t.Content)
 		if err != nil {
+			eng.EmitAudit(store.AuditEvent{
+				SessionID: req.SessionID,
+				Action:    "error",
+				Tool:      req.ToolName,
+				Event:     req.EventName,
+				Direction: "mask",
+				Policy:    eng.Cfg.Hooks.MaskOnError,
+				Error:     err.Error(),
+			})
 			// fail-closed per cfg.Hooks.MaskOnError
 			switch eng.Cfg.Hooks.MaskOnError {
 			case "redact-all":
@@ -164,6 +175,15 @@ func runUnmask(_ context.Context, eng *engine.Engine, adp harness.Adapter, req *
 	if req.ToolName == "Bash" && lastBashCmd != "" {
 		gate := claudecode.NewBashGate(eng.Cfg.Harness.Claudecode.Bash)
 		dec, _ := gate.Classify(lastBashCmd, totalReplacements)
+		eng.EmitAudit(store.AuditEvent{
+			SessionID: req.SessionID,
+			Action:    "bash-gate",
+			Tool:      "Bash",
+			Event:     req.EventName,
+			Decision:  string(dec),
+			Count:     totalReplacements,
+			Direction: "unmask",
+		})
 		if dec == claudecode.BashDeny {
 			resp.DenyReason = "opensecretmask: bash egress denied"
 			return adp.EmitResponse(w, raw, resp)

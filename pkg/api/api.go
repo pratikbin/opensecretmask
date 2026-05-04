@@ -69,7 +69,7 @@ func New(opts Options) (*Masker, error) {
 	if err != nil {
 		return nil, err
 	}
-	ent := detector.NewEntropyScanner(cfg.Detector.Entropy.Threshold, cfg.Detector.Entropy.MinLength)
+	ent := detector.NewEntropyScannerEnabled(cfg.Detector.Entropy.Enabled, cfg.Detector.Entropy.Threshold, cfg.Detector.Entropy.MinLength)
 	regValues := make([]string, 0, len(secs.Secrets))
 	for _, e := range secs.Secrets {
 		regValues = append(regValues, e.Value)
