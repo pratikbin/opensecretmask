@@ -10,3 +10,7 @@ coverage.txt
 .env
 .env.local
 tests/e2e/bin/
+.agents
+.pi
+.windsurf
+.claude
