@@ -140,19 +140,137 @@ func BuiltinRules() []transformer.Rule {
 			EndMarker:   "-----END OPENSSH PRIVATE KEY-----",
 			Segments:    []transformer.Segment{{Name: "ssh-body", Group: 1, Charset: transformer.CharsetBase64}},
 		},
-		// 18. env-import — whole value, base64url (delimiter-safe)
+		// 18. gcp-api-key
 		{
-			ID:        "env-import",
-			Pattern:   regexp.MustCompile(`[A-Za-z0-9_.~-]{12,}`),
-			MinLen:    12, MaxLen: 4096,
-			PrefixLen: 0, Charset: transformer.CharsetBase64URL,
+			ID:        "gcp-api-key",
+			Pattern:   regexp.MustCompile(`AIza[A-Za-z0-9_-]{35}`),
+			MinLen:    39, MaxLen: 39,
+			PrefixLen: 4, Charset: transformer.CharsetBase64URL,
 		},
-		// 19. entropy-high — whole value, base64url (delimiter-safe)
+		// 19. openai-key-project
 		{
-			ID:        "entropy-high",
-			Pattern:   regexp.MustCompile(`[A-Za-z0-9_+/=-]{24,}`),
+			ID:        "openai-key-project",
+			Pattern:   regexp.MustCompile(`sk-proj-[A-Za-z0-9_-]{20,}`),
+			MinLen:    28, MaxLen: 4096,
+			PrefixLen: 8, Charset: transformer.CharsetBase64URL,
+		},
+		// 20. vault-token
+		{
+			ID:        "vault-token",
+			Pattern:   regexp.MustCompile(`hv[sb]\.[A-Za-z0-9_-]{20,}`),
 			MinLen:    24, MaxLen: 4096,
-			PrefixLen: 0, Charset: transformer.CharsetBase64URL,
+			PrefixLen: 4, Charset: transformer.CharsetBase64URL,
+		},
+		// 21. terraform-cloud
+		{
+			ID:      "terraform-cloud",
+			Pattern: regexp.MustCompile(`[A-Za-z0-9]{14}\.atlasv1\.([A-Za-z0-9_-]{60,})`),
+			MinLen:  85, MaxLen: 4096,
+			Segments: []transformer.Segment{{Name: "tfc-body", Group: 1, Charset: transformer.CharsetBase64URL}},
+		},
+		// 22. digitalocean-token
+		{
+			ID:        "digitalocean-token",
+			Pattern:   regexp.MustCompile(`dop_v1_[a-f0-9]{64}`),
+			MinLen:    71, MaxLen: 71,
+			PrefixLen: 7, Charset: transformer.CharsetHex,
+		},
+		// 23. sendgrid-key
+		{
+			ID:      "sendgrid-key",
+			Pattern: regexp.MustCompile(`SG\.([A-Za-z0-9_-]{22})\.([A-Za-z0-9_-]{43})`),
+			MinLen:  69, MaxLen: 69,
+			Segments: []transformer.Segment{
+				{Name: "sg-id", Group: 1, Charset: transformer.CharsetBase64URL},
+				{Name: "sg-secret", Group: 2, Charset: transformer.CharsetBase64URL},
+			},
+		},
+		// 24. twilio-account-sid
+		{
+			ID:        "twilio-account-sid",
+			Pattern:   regexp.MustCompile(`AC[a-f0-9]{32}`),
+			MinLen:    34, MaxLen: 34,
+			PrefixLen: 2, Charset: transformer.CharsetHex,
+		},
+		// 25. newrelic-user-key
+		{
+			ID:        "newrelic-user-key",
+			Pattern:   regexp.MustCompile(`NRAK-[A-Z0-9]{27}`),
+			MinLen:    32, MaxLen: 32,
+			PrefixLen: 5, Charset: transformer.CharsetAlphaUpper,
+		},
+		// 26. sentry-dsn — masks the public key only; URL host/project preserved
+		{
+			ID:      "sentry-dsn",
+			Pattern: regexp.MustCompile(`https://([a-f0-9]{32})@[\w.-]+/\d+`),
+			MinLen:  50, MaxLen: 4096,
+			Segments: []transformer.Segment{{Name: "sentry-pub", Group: 1, Charset: transformer.CharsetHex}},
+		},
+		// 27. npm-token
+		{
+			ID:        "npm-token",
+			Pattern:   regexp.MustCompile(`npm_[A-Za-z0-9]{36}`),
+			MinLen:    40, MaxLen: 40,
+			PrefixLen: 4, Charset: transformer.CharsetAlphanumeric,
+		},
+		// 28. docker-hub-pat
+		{
+			ID:        "docker-hub-pat",
+			Pattern:   regexp.MustCompile(`dckr_pat_[A-Za-z0-9_-]{27,}`),
+			MinLen:    36, MaxLen: 4096,
+			PrefixLen: 9, Charset: transformer.CharsetBase64URL,
+		},
+		// 29. pypi-token
+		{
+			ID:        "pypi-token",
+			Pattern:   regexp.MustCompile(`pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}`),
+			MinLen:    70, MaxLen: 4096,
+			PrefixLen: 24, Charset: transformer.CharsetBase64URL,
+		},
+		// 30. atlassian-api-token
+		{
+			ID:        "atlassian-api-token",
+			Pattern:   regexp.MustCompile(`ATATT[A-Za-z0-9_=-]{180,}`),
+			MinLen:    185, MaxLen: 4096,
+			PrefixLen: 5, Charset: transformer.CharsetBase64,
+		},
+		// 31. linear-api-key
+		{
+			ID:        "linear-api-key",
+			Pattern:   regexp.MustCompile(`lin_api_[A-Za-z0-9]{40}`),
+			MinLen:    48, MaxLen: 48,
+			PrefixLen: 8, Charset: transformer.CharsetAlphanumeric,
+		},
+		// 32. notion-secret
+		{
+			ID:        "notion-secret",
+			Pattern:   regexp.MustCompile(`secret_[A-Za-z0-9]{43}`),
+			MinLen:    50, MaxLen: 50,
+			PrefixLen: 7, Charset: transformer.CharsetAlphanumeric,
+		},
+		// 33. groq-key
+		{
+			ID:        "groq-key",
+			Pattern:   regexp.MustCompile(`gsk_[A-Za-z0-9]{52}`),
+			MinLen:    56, MaxLen: 56,
+			PrefixLen: 4, Charset: transformer.CharsetAlphanumeric,
+		},
+		// 34. huggingface-token
+		{
+			ID:        "huggingface-token",
+			Pattern:   regexp.MustCompile(`hf_[A-Za-z0-9]{34,}`),
+			MinLen:    37, MaxLen: 100,
+			PrefixLen: 3, Charset: transformer.CharsetAlphanumeric,
+		},
+		// 35. postman-key
+		{
+			ID:      "postman-key",
+			Pattern: regexp.MustCompile(`PMAK-([a-f0-9]{24})-([a-f0-9]{34})`),
+			MinLen:  64, MaxLen: 64,
+			Segments: []transformer.Segment{
+				{Name: "pm-id", Group: 1, Charset: transformer.CharsetHex},
+				{Name: "pm-secret", Group: 2, Charset: transformer.CharsetHex},
+			},
 		},
 	}
 }

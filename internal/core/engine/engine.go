@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +16,23 @@ import (
 	"github.com/pratikbin/opensecretmask/internal/core/store"
 	"github.com/pratikbin/opensecretmask/internal/core/transformer"
 )
+
+// PreloadEnv filters: register a .env value as a secret only when the KEY
+// name signals sensitivity AND the value does not look like an identifier.
+// Prevents env-var names ("ANTHROPIC_BASE_URL") and Go identifiers
+// ("keymgr.Hasher") from leaking into the registered-secret set.
+var (
+	envSensitiveKeyHint = regexp.MustCompile(`(?i)(TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE|CREDENTIAL|AUTH|APIKEY|API_KEY|_KEY|KEY_|^KEY$)`)
+	envVarShape         = regexp.MustCompile(`^[A-Z][A-Z0-9_]+$`)
+	goIdentShape        = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$`)
+)
+
+func looksSensitive(key, value string) bool {
+	if envVarShape.MatchString(value) || goIdentShape.MatchString(value) {
+		return false
+	}
+	return envSensitiveKeyHint.MatchString(key)
+}
 
 // Engine wires the masking pipeline. Hook dispatcher constructs one per call.
 type Engine struct {
@@ -44,6 +62,15 @@ func (e *Engine) LoadMappings() (*store.Mappings, error) {
 		return nil, err
 	}
 	return m, nil
+}
+
+// EmitAudit appends an audit event when Audit is wired and Cfg.Audit.Enabled.
+// Errors are swallowed: audit failure must not block the masking pipeline.
+func (e *Engine) EmitAudit(ev store.AuditEvent) {
+	if e.Audit == nil || !e.Cfg.Audit.Enabled {
+		return
+	}
+	_ = e.Audit.Append(ev)
 }
 
 // MaskText runs detector + transformer.Mask, persists new mappings, returns masked text.
@@ -145,6 +172,24 @@ func (e *Engine) MaskText(_ context.Context, sessionID, source, text string) (st
 		}
 	}
 
+	auditSeen := map[string]bool{}
+	for _, h := range hits {
+		mask, ok := resolved[h.Value]
+		if !ok || auditSeen[h.Value] {
+			continue
+		}
+		auditSeen[h.Value] = true
+		e.EmitAudit(store.AuditEvent{
+			SessionID: sessionID,
+			Action:    "mask",
+			Rule:      h.Rule,
+			Mask:      mask,
+			Src:       source,
+			Count:     1,
+			Direction: "mask",
+		})
+	}
+
 	// Apply replacements in descending start order so byte indices stay valid.
 	type rep struct {
 		start, end int
@@ -188,6 +233,13 @@ func (e *Engine) UnmaskText(text string) (string, int, error) {
 			count += strings.Count(text, k)
 		}
 	}
+	if count > 0 {
+		e.EmitAudit(store.AuditEvent{
+			Action:    "unmask",
+			Count:     count,
+			Direction: "unmask",
+		})
+	}
 	return out, count, nil
 }
 
@@ -221,6 +273,9 @@ func (e *Engine) PreloadEnv(_ context.Context, cwd string) (int, error) {
 			if len(x.Value) < e.Cfg.Detector.MinSecretLength {
 				continue
 			}
+			if !looksSensitive(x.Key, x.Value) {
+				continue
+			}
 			entries = append(entries, item{x.Key, x.Value, p})
 		}
 	}
@@ -238,6 +293,8 @@ func (e *Engine) PreloadEnv(_ context.Context, cwd string) (int, error) {
 	}
 
 	imported := 0
+	type importedRec struct{ mask, src string }
+	var newlyImported []importedRec
 	err = e.Lock.WithExclusive(time.Duration(e.Cfg.Hooks.LockTimeoutMs)*time.Millisecond, func() error {
 		m, lerr := store.LoadMappings(mappingsPath)
 		if lerr != nil {
@@ -279,6 +336,7 @@ func (e *Engine) PreloadEnv(_ context.Context, cwd string) (int, error) {
 				LastSeenAt:   now,
 			})
 			imported++
+			newlyImported = append(newlyImported, importedRec{mask: mask, src: it.src})
 		}
 		if serr := store.SaveMappings(mappingsPath, m); serr != nil {
 			return serr
@@ -287,6 +345,16 @@ func (e *Engine) PreloadEnv(_ context.Context, cwd string) (int, error) {
 	})
 	if err != nil {
 		return 0, err
+	}
+	for _, r := range newlyImported {
+		e.EmitAudit(store.AuditEvent{
+			Action:    "mask",
+			Rule:      "env-import",
+			Mask:      r.mask,
+			Src:       r.src,
+			Count:     1,
+			Direction: "mask",
+		})
 	}
 	return imported, nil
 }

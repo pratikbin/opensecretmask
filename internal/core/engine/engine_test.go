@@ -92,7 +92,7 @@ func TestEngine_UnmaskText(t *testing.T) {
 func TestEngine_PreloadEnv(t *testing.T) {
 	eng, root := bootstrapEngine(t)
 	envDir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(envDir, ".env"), []byte("FOO=secret123abcdef\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(envDir, ".env"), []byte("MY_TOKEN=secret123abcdef\n"), 0o600))
 
 	n, err := eng.PreloadEnv(context.Background(), envDir)
 	require.NoError(t, err)

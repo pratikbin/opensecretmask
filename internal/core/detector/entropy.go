@@ -5,10 +5,18 @@ import "math"
 type EntropyScanner struct {
 	threshold float64
 	minLen    int
+	enabled   bool
 }
 
+// NewEntropyScanner returns an enabled scanner (back-compat for existing
+// test/CLI callers). Production hook bootstrap should call
+// NewEntropyScannerEnabled and pass cfg.Detector.Entropy.Enabled explicitly.
 func NewEntropyScanner(threshold float64, minLen int) *EntropyScanner {
-	return &EntropyScanner{threshold: threshold, minLen: minLen}
+	return &EntropyScanner{threshold: threshold, minLen: minLen, enabled: true}
+}
+
+func NewEntropyScannerEnabled(enabled bool, threshold float64, minLen int) *EntropyScanner {
+	return &EntropyScanner{threshold: threshold, minLen: minLen, enabled: enabled}
 }
 
 // ScoreToken returns Shannon entropy in bits/char. >= threshold means "secret-like".
@@ -33,6 +41,9 @@ func (s *EntropyScanner) ScoreToken(t string) float64 {
 }
 
 func (s *EntropyScanner) IsSecret(t string) bool {
+	if !s.enabled {
+		return false
+	}
 	if len(t) < s.minLen {
 		return false
 	}

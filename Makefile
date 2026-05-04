@@ -3,7 +3,7 @@
 E2E_IMAGE ?= osm-e2e:dev
 
 build:
-	go build -trimpath -ldflags="-s -w" -o bin/osm ./cmd/osm
+	go build -trimpath -ldflags="-s -w" -o ~/tools/osm ./cmd/osm
 test:
 	go test -race -count=1 ./...
 test-integration:
