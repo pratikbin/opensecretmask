@@ -166,4 +166,3 @@ func TestDashboardBadRequestID(t *testing.T) {
 		t.Fatalf("missing request status = %d, want 404", code)
 	}
 }
-

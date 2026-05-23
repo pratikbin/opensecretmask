@@ -121,4 +121,3 @@ func newMasker(st *store.Store, entropy bool) (*mask.Masker, error) {
 	}
 	return mask.NewMasker(st, det), nil
 }
-

@@ -138,4 +138,3 @@ func (s *Store) PurgeRequestsOlderThan(ctx context.Context, maxAge time.Duration
 	}
 	return res.RowsAffected()
 }
-

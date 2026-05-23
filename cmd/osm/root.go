@@ -24,4 +24,3 @@ func rootCmd() *cobra.Command {
 	)
 	return root
 }
-

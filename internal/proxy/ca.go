@@ -132,4 +132,3 @@ func LoadCA(dir string) (*CA, error) {
 	}
 	return &CA{Cert: cert, Key: key, certPEM: certPEM, keyPEM: keyPEM}, nil
 }
-

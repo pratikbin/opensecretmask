@@ -77,4 +77,3 @@ func (s *Store) ListRequests(ctx context.Context, limit int) ([]RequestRow, erro
 	}
 	return out, rows.Err()
 }
-

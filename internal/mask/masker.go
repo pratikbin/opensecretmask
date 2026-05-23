@@ -324,4 +324,3 @@ func sortedSecrets(used map[int64]store.Secret) []store.Secret {
 	slices.SortFunc(out, func(a, b store.Secret) int { return cmp.Compare(a.ID, b.ID) })
 	return out
 }
-

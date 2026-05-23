@@ -57,4 +57,3 @@ func TestGarbleRandomizes(t *testing.T) {
 		t.Fatal("two garbles of a long secret were identical")
 	}
 }
-

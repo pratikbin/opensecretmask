@@ -145,4 +145,3 @@ re-run as 'osm init --no-trust' (the CA file is written either way).
 	}
 	fmt.Println("CA installed into the system trust store")
 }
-
