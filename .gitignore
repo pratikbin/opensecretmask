@@ -17,4 +17,6 @@ internal/dashboard/bun.lock
 .env
 .env.test
 ONBOARDING.md
-
+docs
+.claude
+skills-lock.json

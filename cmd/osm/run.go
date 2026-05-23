@@ -70,8 +70,9 @@ func runCmd() *cobra.Command {
 			if conn, derr := net.DialTimeout("tcp", listen, proxyDialTimeout); derr == nil {
 				_ = conn.Close()
 				fmt.Fprintf(os.Stderr, "osm: reusing proxy at %s\n", listen)
+				fmt.Fprintf(os.Stderr, "osm: routing %s through %s\n", args[0], proxyURL)
 			} else {
-				addr, cl, serr := startEphemeralProxy(cmd.Context(), home, extra, entropy, logLevel)
+				addr, cl, serr := startEphemeralProxy(cmd.Context(), home, args[0], extra, entropy, logLevel)
 				if serr != nil {
 					return serr
 				}
@@ -89,8 +90,6 @@ func runCmd() *cobra.Command {
 				"REQUESTS_CA_BUNDLE":  certPath, // Python requests
 				"CURL_CA_BUNDLE":      certPath, // curl
 			})
-
-			fmt.Fprintf(os.Stderr, "osm: routing %s through %s\n", args[0], proxyURL)
 			code, rerr := runChild(bin, args, env)
 			// cleanup drains the ephemeral proxy; run it before os.Exit, which
 			// would otherwise skip it.
@@ -119,7 +118,7 @@ func runCmd() *cobra.Command {
 // startEphemeralProxy brings up a masking proxy and dashboard on loopback
 // ephemeral ports for a single 'osm run'. It returns the proxy address to point
 // the child at and a cleanup func that drains both servers and closes the store.
-func startEphemeralProxy(ctx context.Context, home string, extra []string, entropy bool, logLevel string) (string, func(), error) {
+func startEphemeralProxy(ctx context.Context, home, cmdName string, extra []string, entropy bool, logLevel string) (string, func(), error) {
 	// Proxy and dashboard logs go to a file, never stderr: stderr is shared
 	// with the child, and a TUI agent's screen corrupts on interleaved logs.
 	logPath := filepath.Join(home, "run.log")
@@ -141,12 +140,34 @@ func startEphemeralProxy(ctx context.Context, home string, extra []string, entro
 	if err != nil {
 		return "", nil, fmt.Errorf("load CA — run 'osm init' first: %w", err)
 	}
+
+	// Bind ports before prompting for the passphrase so the user sees where
+	// the proxy and dashboard will be before they type anything.
+	pxyLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", nil, fmt.Errorf("proxy listen: %w", err)
+	}
+	dashLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		_ = pxyLn.Close()
+		return "", nil, fmt.Errorf("dashboard listen: %w", err)
+	}
+
+	dashURL := "http://" + dashLn.Addr().String()
+	proxyAddr := pxyLn.Addr().String()
+	fmt.Fprintf(os.Stderr, "osm: dashboard %s · logs %s\n", dashURL, logPath)
+	fmt.Fprintf(os.Stderr, "osm: routing %s through http://%s\n", cmdName, proxyAddr)
+
 	st, err := openUnlocked(ctx, home)
 	if err != nil {
+		_ = pxyLn.Close()
+		_ = dashLn.Close()
 		return "", nil, err
 	}
 	m, err := newMasker(st, entropy)
 	if err != nil {
+		_ = pxyLn.Close()
+		_ = dashLn.Close()
 		_ = st.Close()
 		return "", nil, err
 	}
@@ -158,18 +179,6 @@ func startEphemeralProxy(ctx context.Context, home string, extra []string, entro
 			dialect = "custom"
 		}
 		providers = append(providers, proxy.Provider{Host: host, Dialect: dialect})
-	}
-
-	pxyLn, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		_ = st.Close()
-		return "", nil, fmt.Errorf("proxy listen: %w", err)
-	}
-	dashLn, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		_ = pxyLn.Close()
-		_ = st.Close()
-		return "", nil, fmt.Errorf("dashboard listen: %w", err)
 	}
 
 	dashSrv, err := dashboard.NewServer(st, logger)
@@ -201,9 +210,7 @@ func startEphemeralProxy(ctx context.Context, home string, extra []string, entro
 		return nil
 	})
 
-	dashURL := "http://" + dashLn.Addr().String()
-	logger.Info("ephemeral proxy started", "proxy", pxyLn.Addr().String(), "dashboard", dashURL)
-	fmt.Fprintf(os.Stderr, "osm: dashboard %s · logs %s\n", dashURL, logPath)
+	logger.Info("ephemeral proxy started", "proxy", proxyAddr, "dashboard", dashURL)
 
 	started = true
 	cleanup := func() {
@@ -278,4 +285,3 @@ func withEnv(base []string, over map[string]string) []string {
 	}
 	return out
 }
-

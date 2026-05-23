@@ -55,4 +55,3 @@ func pick(set string) byte {
 	}
 	return set[n.Int64()]
 }
-

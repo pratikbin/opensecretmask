@@ -50,4 +50,3 @@ func statusCmd() *cobra.Command {
 		},
 	}
 }
-

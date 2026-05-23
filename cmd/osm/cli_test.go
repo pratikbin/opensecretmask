@@ -127,4 +127,3 @@ func TestCLIRunSpawnsOwnProxy(t *testing.T) {
 		t.Fatalf("'osm run' should spawn its own proxy and succeed: %v", err)
 	}
 }
-

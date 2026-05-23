@@ -17,4 +17,3 @@ type goproxyLogger struct {
 func (g goproxyLogger) Printf(format string, v ...any) {
 	g.logger.Debug("goproxy: " + strings.TrimRight(fmt.Sprintf(format, v...), "\n"))
 }
-

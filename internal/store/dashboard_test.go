@@ -121,5 +121,3 @@ func TestGetRequestAndPurge(t *testing.T) {
 		t.Fatal("GetRequest should fail after the request is purged")
 	}
 }
-
-

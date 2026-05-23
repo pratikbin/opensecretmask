@@ -212,4 +212,3 @@ func TestMaskerRegister(t *testing.T) {
 		t.Fatalf("registered secret not stored correctly: %+v", reg)
 	}
 }
-

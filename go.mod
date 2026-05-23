@@ -3,21 +3,16 @@ module github.com/pratikbin/opensecretmask
 go 1.26
 
 require (
-	github.com/BurntSushi/toml v1.6.0
 	github.com/elazarl/goproxy v1.8.3
-	github.com/gofrs/flock v0.13.0
-	github.com/iohub/ahocorasick v0.0.0-20240118134817-7d0e3abf6181
 	github.com/smallstep/truststore v0.13.0
 	github.com/sourcegraph/conc v0.3.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.42.0
-	go.uber.org/goleak v1.3.0
 	golang.org/x/crypto v0.51.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/term v0.43.0
 	modernc.org/sqlite v1.50.1
-	mvdan.cc/sh/v3 v3.13.1
 )
 
 require (

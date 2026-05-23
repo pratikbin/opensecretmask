@@ -156,4 +156,3 @@ func (s *Store) Unlock(ctx context.Context, passphrase string) error {
 
 // Unlocked reports whether the store has a usable cipher.
 func (s *Store) Unlocked() bool { return s.c != nil }
-

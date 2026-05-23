@@ -427,4 +427,3 @@ func hostOnly(hostport string) string {
 	}
 	return hostport
 }
-

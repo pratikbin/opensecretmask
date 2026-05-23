@@ -40,4 +40,3 @@ func addCmd() *cobra.Command {
 		},
 	}
 }
-

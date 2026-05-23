@@ -94,4 +94,3 @@ func (c *Cipher) Index(plaintext []byte) []byte {
 	m.Write(plaintext)
 	return m.Sum(nil)
 }
-
