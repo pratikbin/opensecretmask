@@ -56,3 +56,4 @@ func TestInit_ErrorsWhenAlreadyInitialized(t *testing.T) {
 	_, err = runInit(t, "--force")
 	require.NoError(t, err)
 }
+

@@ -1,190 +1,177 @@
 # opensecretmask
 
-`osm` is a Go credential-masking hook binary for AI coding agents. It sits between
-your shell tools and the LLM: secrets in tool output are replaced with
-format-preserving masks before the model sees them, and the model's own emissions
-that contain known masks are reversed before they hit `bash`, `Edit`, or `Write`.
-The goal is narrow — keep plaintext credentials out of the conversation
-transcript and out of files written by the agent — without touching how you store
-secrets at rest. This is a **leak-prevention layer**, not a vault.
+`osm` is a local CA-MITM proxy that keeps secrets out of LLM API traffic.
+It sits between your AI tools (Claude Code, the OpenAI SDK, …) and the
+provider. On the way out it swaps every secret for a **format-preserving
+fake**; on the way back it restores the original. The provider only ever
+sees the fake — your real keys never leave the machine.
 
-> **Read the [Threat Model](docs/THREAT_MODEL.md) before relying on this for
-> anything sensitive.** v1 trades at-rest encryption for simplicity.
+```
+  AI tool ──HTTPS──▶  osm proxy  ──HTTPS──▶  api.anthropic.com
+                      │ mask request body     (sees only fakes)
+                      │ unmask JSON / SSE
+  AI tool ◀─HTTPS───  osm proxy  ◀─HTTPS───  api.anthropic.com
+```
+
+A secret like `sk-ant-api03-REALKEY…` becomes `sk-ant-api03-9fX2qLm…` — same
+prefix, same length, same character classes — so the model treats it exactly
+like a real credential. The mapping is kept, encrypted, in a local SQLite
+database; restoring the original on the response is a lookup.
+
+## Install
+
+```sh
+go install github.com/pratikbin/opensecretmask/cmd/osm@latest
+# or from source:
+git clone https://github.com/pratikbin/opensecretmask
+cd opensecretmask && go build -o osm ./cmd/osm
+```
 
 ## Quickstart
 
-Install:
-
-```bash
-go install github.com/pratikbin/opensecretmask/cmd/osm@latest
-# or build from source:
-git clone https://github.com/pratikbin/opensecretmask
-cd opensecretmask && make build && ./bin/osm version
+```sh
+osm init                            # state dir, local CA (installed), passphrase
+osm add OPENAI_KEY=sk-proj-…         # register a secret to mask
+osm preload                         # …or scan .env files in the current directory
+osm proxy                           # run the proxy + dashboard
 ```
 
-Initialize the per-user state directory `~/.opensecretmask/` (mode 0700,
-generates `install.key`, writes default `config.toml`, creates empty
-`secrets.json` / `mappings.json` / `audit.log`):
+Then point your tools at the proxy (`osm init` prints these with real paths):
 
-```bash
-osm init
-osm doctor          # verify file modes, key presence, config validity
+```sh
+export HTTPS_PROXY=http://127.0.0.1:8787
+export NODE_EXTRA_CA_CERTS=~/.opensecretmask/ca-cert.pem   # Claude Code / Node tools
+export SSL_CERT_FILE=~/.opensecretmask/ca-cert.pem         # some Python / Go tools
 ```
 
-Wire the claude-code hooks into `~/.claude/settings.json` (idempotent;
-re-runnable; preserves unrelated entries):
+Or skip both the exports **and** `osm proxy` — `osm run` is self-contained.
+It reuses a running `osm proxy` if one is up, otherwise starts its own
+proxy and dashboard on ephemeral ports for just that command and tears
+them down on exit. The per-process env vars make Node, Python, and curl
+trust the CA even without the system trust install:
 
-```bash
-osm install claude-code
-osm install claude-code --dry-run    # preview without writing
+```sh
+osm run -- claude          # spawns a proxy, routes claude through it
+osm run -- codex
 ```
 
-Add a known secret manually (useful when env-file detection misses one):
+## What `osm init` does
 
-```bash
-osm add MY_TOKEN ghp_realvalueXXXXXXXXXXXXXXXXXXXXXXXX
-osm status          # show registered rules + mapping count
-osm tail            # follow the audit log
-```
+`osm init` is one-time setup:
 
-Uninstall:
+1. Creates the state directory `~/.opensecretmask/` (mode `0700`).
+2. Prompts for a passphrase and creates the encrypted SQLite store. The
+   passphrase is never written to disk.
+3. Generates a local root CA — `ca-cert.pem` and `ca-key.pem` (mode `0600`).
+4. **Installs the CA into your system trust store.** This is the only step
+   that needs administrator access, because it writes to a root-owned
+   location:
+   - **macOS** — `sudo security add-trusted-cert -d -k /Library/Keychains/System.keychain ca-cert.pem` (the System keychain).
+   - **Linux** — copies the cert to `/usr/local/share/ca-certificates/` and runs `sudo update-ca-certificates`.
 
-```bash
-osm uninstall claude-code   # removes only osm-tagged hook entries
-```
+   Without this, your tools reject the proxy's intercepted TLS connection
+   with a certificate error.
+
+Before step 4, `osm init` prints exactly what it will run and waits **5
+seconds** so you can cancel with Ctrl-C. To skip the trust install, run
+`osm init --no-trust` — the CA file is still written; trust it yourself
+later, or per-tool via `NODE_EXTRA_CA_CERTS` / `SSL_CERT_FILE`. Steps 1–3
+need no special privileges.
 
 ## How it works
 
-```
-            +-----------------+
-  tool ---> |  osm hook       | --(masked output)--> claude-code --> LLM
-            |  PostToolUse    |
-            +-----------------+
+- **Interception** — `osm` is an HTTPS proxy with its own local CA. `osm init`
+  installs that CA so your tools trust the intercepted connection. Only
+  configured LLM hosts are intercepted; all other traffic is tunnelled
+  untouched.
+- **Detection** — request bodies are scanned with 48 vendored credential
+  patterns (from [pipelock](https://github.com/luckyPipewrench/pipelock),
+  Apache-2.0) plus your registered secrets. An optional Shannon-entropy pass
+  (`osm proxy --detect-entropy`) catches unknown high-entropy tokens.
+- **Masking** — each secret is replaced by a random, same-shape fake. The
+  same secret always maps to the same fake, so the model sees something
+  stable and credential-shaped.
+- **Unmasking** — JSON responses and SSE token streams are scanned for known
+  fakes and reversed. Streaming uses tail-hold buffering, so a fake split
+  across two stream chunks is still caught.
+- **Storage** — secret values are encrypted with AES-256-GCM; the key is
+  derived from your passphrase with Argon2id. The passphrase is never stored.
 
-            +-----------------+
-   LLM ---> |  osm hook       | --(unmasked input)--> tool
-            |  PreToolUse     |
-            +-----------------+
-```
+## Commands
 
-- **PostToolUse**: stream-scans tool output, runs detectors (env-file rules,
-  patterns, optional entropy), HMACs each detected secret with `install.key`,
-  derives a format-preserving mask of the same length and charset class, and
-  rewrites the output via `updatedToolOutput`.
-- **PreToolUse**: parses tool input, looks up known mask strings in
-  `mappings.json`, substitutes the real values back, and forwards the
-  unmasked input to the tool.
-- **Storage**: `~/.opensecretmask/secrets.json` (registered rules),
-  `mappings.json` (mask ↔ real lookup, used at unmask time), `config.toml`,
-  `install.key` (32 bytes, HMAC key), `audit.log` (NDJSON, never logs real
-  values — only truncated mask + rule ID).
-- **Concurrency**: `flock` + tmp-file + atomic `rename` for every write.
+| command | purpose |
+| --- | --- |
+| `osm init` | create the state directory, CA, and encrypted store |
+| `osm proxy` | run the masking proxy and dashboard |
+| `osm run -- command [args]` | run a command routed through the proxy |
+| `osm add NAME=VALUE` | register a secret to mask |
+| `osm preload [dir]` | register every value found in `.env` files |
+| `osm status` | show stored secrets and proxy activity |
+| `osm doctor` | check the installation |
 
-Architecture detail and the canonical request/response envelope are in
-[design spec §3](docs/superpowers/specs/2026-05-02-opensecretmask-design.md#3-architecture-overview).
+`osm proxy` intercepts the major LLM provider API hosts by default —
+Anthropic, OpenAI, Google Gemini/Vertex, xAI, Mistral, Cohere, Perplexity,
+DeepSeek, Groq, Together, Fireworks, OpenRouter, HuggingFace and more (35
+hosts). Add others with `--provider api.example.com=openai` (repeatable).
+Cloud platforms with per-resource hostnames (Azure OpenAI, AWS Bedrock,
+watsonx, Databricks, OCI) are not matched by default — add them explicitly.
 
-## Threat model
+**Path scoping.** Each provider can restrict masking to specific request
+paths via `Provider.Paths` (regexp list). An empty list or `"*"` masks every
+path — the safe default. Anthropic and OpenAI currently scope to their
+completion endpoints (`/v1/messages`, `/v1/chat/completions`, etc.) because
+those are the only paths observed to carry secrets; their telemetry/event-log
+endpoints are forwarded unmasked. All other hosts mask every path. Out-of-scope
+requests are still intercepted and logged (dashboard shows `masked=0`) so you
+can spot unexpected secrets and switch a host back to `"*"` if needed.
 
-**READ THIS BEFORE USE.** Full document: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
+## Dashboard
 
-What `osm` does defend:
+`osm proxy` serves a dashboard at `http://127.0.0.1:8788`: live request
+history, the secret store, and per-secret reveal-on-click. Secrets are shown
+masked — the plaintext is decrypted only when you explicitly reveal it.
 
-- Secrets in tool output reaching the LLM via PostToolUse rewrite.
-- LLM emitting a real secret it never saw — masks are HMAC-derived; without
-  `install.key` the LLM cannot derive a real value from a mask alone.
-- Concurrent sessions corrupting state (flock + atomic rename).
-- Audit log becoming a credential dump (truncated mask + rule ID only).
+## Security model
 
-What `osm` does NOT defend (v1):
-
-- **Plaintext at rest.** `secrets.json` and `mappings.json` store real values
-  in plaintext, protected only by mode 0600 + dir 0700. Anyone with read
-  access to `~/.opensecretmask/` reads the secrets directly. Use `psst` or
-  1Password for true vaulting.
-- Secrets already in conversation history before `osm install` ran.
-- Encoded secrets (base64, hex, gzip) — v1 is plaintext-only detection.
-- Secret split across two tool invocations.
-- Local-machine compromise.
-- User pasting a raw secret in a prompt (claude-code's `UserPromptSubmit`
-  cannot rewrite prompt content; warn-only).
-
-## Configuration
-
-`~/.opensecretmask/config.toml`. Full schema with defaults and field
-semantics is in
-[design spec §7.3](docs/superpowers/specs/2026-05-02-opensecretmask-design.md#73-configtoml-schema-full).
-Highlights:
-
-- `[detector]` — env-file detection, optional entropy, allowlist.
-- `[hooks]` — direction-aware failure policy (`mask_on_error = "deny"`,
-  `unmask_on_error = "passthrough"`), `lock_timeout_ms`, `max_scan_bytes`.
-- `[hooks.skip_extensions]` — skip binary file types entirely.
-- `[harness.claudecode]` — matchers, `warn_on_prompt`.
-- `[audit]` — `truncate_mask_to`, rotation size.
-
-## CLI
-
-| Command | Description |
-|---|---|
-| `osm init` | Create `~/.opensecretmask/`, generate `install.key`, write default config. |
-| `osm doctor` | Check file modes, key presence, config validity; auto-repair to 600/700. |
-| `osm scan [path]` | Scan a path or stdin for secrets without modifying state. |
-| `osm hook --harness=<name> <event>` | Internal: invoked by harness hooks (PostToolUse, PreToolUse, UserPromptSubmit, SessionStart). |
-| `osm install <harness>` | Install harness hook entries. `--dry-run` previews. |
-| `osm uninstall <harness>` | Remove only `osm`-tagged hook entries. |
-| `osm add <name> <value>` | Register a known secret manually. |
-| `osm allow <value>` | Add a literal value to the detector allowlist. |
-| `osm status` | Print registered rules, mapping count, config summary. |
-| `osm tail` | Follow `audit.log` (NDJSON). |
-| `osm version` | Print build version. |
+- **Registered secrets** (`osm add`, `osm preload`) are matched exactly and
+  are the **guaranteed** layer — they are always masked.
+- **Pattern / entropy detection** is best-effort: it catches common
+  credential formats but is not a guarantee. Register anything critical.
+- The proxy **fails closed** — if a request body cannot be masked, the
+  request is blocked rather than forwarded.
+- The local CA private key lives at `~/.opensecretmask/ca-key.pem` (mode
+  `0600`). Anything that can read it could intercept your HTTPS traffic;
+  treat it like any other private key.
+- `osm` binds to loopback only. The dashboard can reveal decrypted secrets —
+  keep it loopback-only.
 
 ## Limitations
 
-v1 explicitly excludes container detection beyond a fixed adaptive overlap,
-encoded-secret detection (base64/hex/gzip), prompt-content rewriting,
-at-rest encryption, and tamper-evident audit chaining. Edge cases and
-performance bounds are documented in
-[design spec §8](docs/superpowers/specs/2026-05-02-opensecretmask-design.md#8-edge-cases--performance).
+- v1 matches secrets as raw bytes; a secret the client JSON-escapes (quotes,
+  backslashes) may be missed. Provider API keys are escape-safe.
+- The dashboard has no authentication beyond the loopback bind.
 
 ## Development
 
-```bash
-make build              # ./bin/osm
-make test               # unit suite, race + count=1
-make test-integration   # integration suite under //go:build integration
-make test-all           # both suites
-go vet ./...
-golangci-lint run       # CI runs this; local optional
-
-# fuzz targets (each has inline seeds; run as long as you like)
-go test -fuzz=^FuzzMaskUnmask$              -fuzztime=30s ./internal/core/transformer/...
-go test -fuzz=^FuzzBashGate$                -fuzztime=30s ./internal/harness/claudecode/...
-go test -fuzz=^FuzzScanner_StreamRobustness$ -fuzztime=30s ./internal/core/detector/...
-
-# benchmarks
-go test -bench=. -benchmem -run=^$ ./cmd/osm/... ./internal/core/...
+```sh
+make build   # go build -o osm ./cmd/osm
+make test    # go test -race ./...
+make lint    # golangci-lint + gosec + govulncheck
+make all     # build + test + lint
 ```
 
-**Test infrastructure highlights**
+Or directly:
 
-- `tests/integration/` is gated by `//go:build integration` so the unit
-  suite stays fast; the integration matrix exercises every event ×
-  tool × direction pairing through the real `osm` binary.
-- Race tests in `internal/core/engine/` hammer `MaskText` and
-  `PreloadEnv` under contention with `-race -count=10` to catch
-  regressions in the lock-protected write path.
-- `goleak.VerifyTestMain` is installed in `engine` and `claudecode`
-  as a defensive tripwire — neither package spawns goroutines today,
-  but any future leak fails the suite immediately.
-- Known bugs (see `CLAUDE.md` "Known issues") have regression markers
-  in `*/known_bugs_test.go` files, gated by `t.Skip`. Removing the
-  skip line is the contract for "this bug is fixed".
+```sh
+go build ./cmd/osm
+go test ./...
+golangci-lint run ./... && gosec ./... && govulncheck ./...
+```
 
-CI (`.github/workflows/ci.yml`) runs vet, race-tests, build, lint, and
-gosec on Linux + macOS across Go 1.25.x and 1.26.x. Releases are cut by
-goreleaser on `v*` tags (`.github/workflows/release.yml`,
-`.goreleaser.yaml`).
+The `internal/store/db` package is sqlc-generated. After editing
+`internal/store/sql/schema.sql` or `query.sql`, regenerate it:
 
-## License
+```sh
+go run github.com/sqlc-dev/sqlc/cmd/sqlc@latest generate
+```
 
-MIT.
