@@ -33,6 +33,7 @@ type Server struct {
 	store  *store.Store
 	tmpl   *template.Template
 	mux    *http.ServeMux
+	srv    *http.Server
 	logger *slog.Logger
 	done   chan struct{}
 	stop   sync.Once
@@ -75,11 +76,13 @@ func (s *Server) Handler() http.Handler { return s.mux }
 // called. The caller binds ln so a bind failure surfaces synchronously.
 func (s *Server) Serve(ln net.Listener) error {
 	go s.purgeLoop()
-	srv := &http.Server{
-		Handler:           s.mux,
-		ReadHeaderTimeout: 15 * time.Second,
-	}
-	return srv.Serve(ln)
+	return s.srv.Serve(ln)
+}
+
+// Shutdown gracefully stops the dashboard HTTP server and the purge loop.
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.Stop()
+	return s.srv.Shutdown(ctx)
 }
 
 // Stop signals purgeLoop to exit. Safe to call more than once.
