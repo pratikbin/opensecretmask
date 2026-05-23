@@ -84,7 +84,7 @@ need no special privileges.
   installs that CA so your tools trust the intercepted connection. Only
   configured LLM hosts are intercepted; all other traffic is tunnelled
   untouched.
-- **Detection** — request bodies are scanned with 48 vendored credential
+- **Detection** — request bodies are scanned with 45 vendored credential
   patterns (from [pipelock](https://github.com/luckyPipewrench/pipelock),
   Apache-2.0) plus your registered secrets. An optional Shannon-entropy pass
   (`osm proxy --detect-entropy`) catches unknown high-entropy tokens.
@@ -102,6 +102,7 @@ need no special privileges.
 | command | purpose |
 | --- | --- |
 | `osm init` | create the state directory, CA, and encrypted store |
+| `osm uninstall` | remove the CA from the system trust store |
 | `osm proxy` | run the masking proxy and dashboard |
 | `osm run -- command [args]` | run a command routed through the proxy |
 | `osm add NAME=VALUE` | register a secret to mask |
@@ -166,12 +167,5 @@ Or directly:
 go build ./cmd/osm
 go test ./...
 golangci-lint run ./... && gosec ./... && govulncheck ./...
-```
-
-The `internal/store/db` package is sqlc-generated. After editing
-`internal/store/sql/schema.sql` or `query.sql`, regenerate it:
-
-```sh
-go run github.com/sqlc-dev/sqlc/cmd/sqlc@latest generate
 ```
 
