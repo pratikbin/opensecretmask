@@ -8,10 +8,10 @@ the responses. Real credentials never reach the provider.
 
 | Package | Role |
 | --- | --- |
-| `cmd/osm` | cobra CLI: `init`, `proxy`, `run`, `add`, `preload`, `status`, `doctor` |
+| `cmd/osm` | cobra CLI: `init`, `uninstall`, `proxy`, `run`, `add`, `preload`, `status`, `doctor` |
 | `internal/crypto` | AES-256-GCM + Argon2id key derivation |
 | `internal/store` | encrypted SQLite (`modernc.org/sqlite`, no cgo) |
-| `internal/detect` | 48 vendored credential regexes + Shannon entropy |
+| `internal/detect` | 45 vendored credential regexes + Shannon entropy |
 | `internal/mask` | format-preserving garble, masker, streaming unmasker |
 | `internal/proxy` | `goproxy` CA-MITM, route-by-host, request/response masking |
 | `internal/dashboard` | embedded htmx + daisyUI web UI: tabbed overview / requests / secrets, per-request debug view |
