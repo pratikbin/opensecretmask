@@ -14,3 +14,5 @@ tests/e2e/bin/
 .pi
 .windsurf
 .claude
+.firecrawl
+node_modules
