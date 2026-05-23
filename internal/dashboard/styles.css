@@ -1,0 +1,27 @@
+@import "tailwindcss";
+@plugin "daisyui" {
+  themes: dark --default;
+}
+@source "./templates";
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+}
+
+/* Highlights for masked secrets (and their revealed originals) in the
+   per-request debug body view. */
+mark.mark-mask {
+  background-color: var(--color-warning);
+  color: var(--color-warning-content);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+mark.mark-orig {
+  background-color: var(--color-error);
+  color: var(--color-error-content);
+  border-radius: 3px;
+  padding: 0 2px;
+}

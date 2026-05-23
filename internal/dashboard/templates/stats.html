@@ -1,0 +1,18 @@
+{{define "stats"}}<div class="cards">
+  <div class="card">
+    <div class="n">{{.Secrets}}</div>
+    <div class="l">secrets</div>
+    <div class="d">{{.Registered}} registered &middot; {{.Detected}} detected</div>
+  </div>
+  <div class="card">
+    <div class="n">{{.Requests}}</div>
+    <div class="l">requests</div>
+    <div class="d">{{.MaskedRequests}} carried secrets</div>
+  </div>
+  <div class="card">
+    <div class="n">{{.TotalMasked}}</div>
+    <div class="l">masking events</div>
+    <div class="d">secrets swapped outbound</div>
+  </div>
+</div>{{end}}
+

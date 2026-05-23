@@ -1,33 +1,16 @@
-run:
-  timeout: 5m
-  tests: true
+# golangci-lint v2 config. Requires golangci-lint v2.6.0+ (the `modernize`
+# linter is unavailable on v1). Install: go install
+# github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+version: "2"
 
 linters:
-  disable-all: true
+  default: standard
   enable:
-    - errcheck
-    - govet
-    - staticcheck
-    - gosimple
-    - ineffassign
-    - unused
-    - gocritic
-    - misspell
-    - nakedret
-    - prealloc
-    - unconvert
-    - unparam
+    - modernize
+  exclusions:
+    generated: lax
 
-linters-settings:
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - performance
-      - style
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-        - unparam
+formatters:
+  enable:
+    - gofmt
+    - goimports

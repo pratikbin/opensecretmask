@@ -38,10 +38,11 @@ func TestConfigValidate_AcceptsUnboundedNumeric_KnownBug(t *testing.T) {
 		"checks on MaxScanBytes / LockTimeoutMs / MaxContainerBytes. Spec-locked.")
 
 	cfg := DefaultConfig()
-	cfg.Hooks.MaxScanBytes = 1 << 40
-	cfg.Hooks.LockTimeoutMs = math.MaxInt32
-	cfg.Hooks.MaxContainerBytes = 1 << 40
+	cfg.Engine.MaxScanBytes = 1 << 40
+	cfg.Engine.LockTimeoutMs = math.MaxInt32
+	cfg.Engine.MaxContainerBytes = 1 << 40
 
 	err := cfg.Validate()
 	require.Error(t, err, "post-fix: Validate must reject unbounded numeric fields")
 }
+

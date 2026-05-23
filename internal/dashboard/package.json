@@ -1,0 +1,12 @@
+{
+  "name": "opensecretmask-dashboard",
+  "private": true,
+  "description": "Build tooling for the embedded dashboard CSS (Tailwind v4 + daisyUI). The runtime is pure Go — assets/dashboard.css is the committed, embedded artifact.",
+  "scripts": {
+    "build": "tailwindcss -i styles.css -o assets/dashboard.css --minify"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.0",
+    "daisyui": "^5.0.0"
+  }
+}
