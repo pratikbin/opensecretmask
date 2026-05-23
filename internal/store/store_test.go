@@ -167,4 +167,3 @@ func TestListRevealTouch(t *testing.T) {
 		t.Fatalf("expected hits=1 after touch, got %d", metas[0].Hits)
 	}
 }
-

@@ -195,4 +195,3 @@ func (s *Store) MaskExists(ctx context.Context, mask string) (bool, error) {
 	}
 	return true, nil
 }
-

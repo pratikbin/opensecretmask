@@ -302,4 +302,3 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 	s.logger.Error("request handler failed", "err", err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }
-

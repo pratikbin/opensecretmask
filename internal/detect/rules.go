@@ -61,4 +61,3 @@ var rules = []rawRule{
 	{"Credential in URL", "high", `(?m)(?:^|[?&;])\s*(?:password|passwd|secret|token|apikey|api_key|api-key)\s*=\s*([^\s&]{4,})`, 1},
 	{"Environment Variable Secret", "high", `(?-i:[A-Z][A-Z0-9]*[_-](?:SECRET(?:[_-]ACCESS)?[_-]?KEY|SECRET|PASSWORD|PASSWD|TOKEN|API[_-]?KEY))\s*=\s*(\S{8,})`, 1},
 }
-

@@ -59,4 +59,3 @@ func doctorCmd() *cobra.Command {
 		},
 	}
 }
-

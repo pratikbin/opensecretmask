@@ -56,4 +56,3 @@ func (r *unmaskReader) Read(p []byte) (int, error) {
 }
 
 func (r *unmaskReader) Close() error { return r.src.Close() }
-

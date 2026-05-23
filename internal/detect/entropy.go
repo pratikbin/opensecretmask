@@ -57,4 +57,3 @@ func isTokenByte(b byte) bool {
 	}
 	return false
 }
-

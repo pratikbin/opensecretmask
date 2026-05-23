@@ -170,4 +170,3 @@ func newLogger(w io.Writer, level string) (*slog.Logger, error) {
 	})
 	return slog.New(h), nil
 }
-

@@ -72,4 +72,3 @@ func BenchmarkMaskBodyNoSecret(b *testing.B) {
 		}
 	}
 }
-

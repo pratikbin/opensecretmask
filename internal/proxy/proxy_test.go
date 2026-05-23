@@ -241,4 +241,3 @@ func TestProxyTunnelsNonLLMHostUntouched(t *testing.T) {
 		t.Fatalf("non-LLM host should be tunneled untouched, got %q", got)
 	}
 }
-

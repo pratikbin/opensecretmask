@@ -156,4 +156,3 @@ func (d *Detector) LiteralPrefixLen(value string) int {
 	}
 	return best
 }
-

@@ -25,4 +25,3 @@ func BenchmarkScanNoSecret(b *testing.B) {
 		}
 	}
 }
-

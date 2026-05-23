@@ -26,4 +26,3 @@ all: build test lint
 clean:
 	rm -f $(BIN)
 	go clean ./...
-

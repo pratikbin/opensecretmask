@@ -80,4 +80,3 @@ func (u *StreamUnmasker) replace() {
 		}
 	}
 }
-
