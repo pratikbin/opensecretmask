@@ -161,3 +161,4 @@ func newScanCmd() *cobra.Command {
 	c.Flags().BoolVar(&noPersist, "no-persist", false, "do not register new findings")
 	return c
 }
+

@@ -1,34 +1,33 @@
-.PHONY: build test test-integration test-all test-e2e e2e-image e2e-binary lint vet sec fmt clean
+.PHONY: build test lint vuln fix generate all clean
 
-E2E_IMAGE ?= osm-e2e:dev
+BIN := osm
 
 build:
-	go build -trimpath -ldflags="-s -w" -o ~/tools/osm ./cmd/osm
-test:
-	go test -race -count=1 ./...
-test-integration:
-	go test -race -count=1 -tags=integration ./tests/integration/...
-test-all:
-	go test -race -count=1 -tags=integration ./...
+	go build -o $(BIN) ./cmd/osm
 
-# end-to-end tests drive a real claude-code CLI inside a docker container
-# with osm hooks installed. Requires a docker daemon (DOCKER_HOST may
-# point at a remote linux/amd64 host) and ANTHROPIC_AUTH_TOKEN in env.
-e2e-binary:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
-	    -o tests/e2e/bin/osm-linux-amd64 ./cmd/osm
-e2e-image: e2e-binary
-	docker build -t $(E2E_IMAGE) tests/e2e
-test-e2e: e2e-image
-	go test -count=1 -tags=e2e -timeout=15m ./tests/e2e/...
+test:
+	go test -race ./...
 
 lint:
 	golangci-lint run ./...
-vet:
-	go vet ./...
-sec:
-	gosec -quiet ./...
-fmt:
-	gofmt -s -w .
+	gosec ./...
+	govulncheck ./...
+
+vuln:
+	govulncheck ./...
+
+# go fix applies Go 1.26 modernize-style transforms in place.
+fix:
+	go fix ./...
+	gofmt -w .
+
+# generate regenerates the sqlc type-safe store/db package from the SQL files.
+generate:
+	go run github.com/sqlc-dev/sqlc/cmd/sqlc@latest generate
+
+all: build test lint
+
 clean:
-	rm -rf bin dist tests/e2e/bin
+	rm -f $(BIN)
+	go clean ./...
+

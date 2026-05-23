@@ -1,0 +1,7 @@
+{{define "tabbar"}}<div role="tablist" class="tabs tabs-border shrink-0 px-4 pt-1 bg-base-200 border-b border-base-content/10">
+  <a role="tab" class="tab{{if eq . "overview"}} tab-active{{end}}" hx-get="/" hx-target="#dash" hx-swap="outerHTML" hx-push-url="true">Overview</a>
+  <a role="tab" class="tab{{if eq . "requests"}} tab-active{{end}}" hx-get="/requests" hx-target="#dash" hx-swap="outerHTML" hx-push-url="true">Requests</a>
+  <a role="tab" class="tab{{if eq . "secrets"}} tab-active{{end}}" hx-get="/secrets" hx-target="#dash" hx-swap="outerHTML" hx-push-url="true">Secrets</a>
+</div>{{end}}
+
+{{define "status"}}{{if not .}}<span class="badge badge-ghost badge-sm">&mdash;</span>{{else if and (ge . 200) (lt . 300)}}<span class="badge badge-success badge-sm">{{.}}</span>{{else}}<span class="badge badge-error badge-sm">{{.}}</span>{{end}}{{end}}

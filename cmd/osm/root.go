@@ -1,34 +1,27 @@
 package main
 
-import (
-	"errors"
+import "github.com/spf13/cobra"
 
-	"github.com/spf13/cobra"
-)
-
-var Version = "dev"
-
-var errNotImplemented = errors.New("not implemented")
-
-func newRootCmd() *cobra.Command {
+func rootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "osm",
-		Short:         "opensecretmask — credential masker for AI coding agents",
+		Use:   "osm",
+		Short: "opensecretmask — local masking proxy for LLM API traffic",
+		Long: "opensecretmask (osm) runs a local CA-MITM proxy that swaps secrets in\n" +
+			"requests to LLM APIs for format-preserving fakes, then restores them in\n" +
+			"the responses. Real secrets never reach the provider.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 	root.AddCommand(
-		newInitCmd(),
-		newDoctorCmd(),
-		newScanCmd(),
-		newHookCmd(),
-		newInstallCmd(),
-		newUninstallCmd(),
-		newAddCmd(),
-		newAllowCmd(),
-		newStatusCmd(),
-		newTailCmd(),
-		newVersionCmd(),
+		initCmd(),
+		uninstallCmd(),
+		proxyCmd(),
+		runCmd(),
+		addCmd(),
+		preloadCmd(),
+		statusCmd(),
+		doctorCmd(),
 	)
 	return root
 }
+

@@ -1,0 +1,19 @@
+{{define "index"}}<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>opensecretmask</title>
+<link rel="stylesheet" href="/assets/dashboard.css">
+<script src="/assets/htmx.min.js"></script>
+</head>
+<body class="h-screen flex flex-col overflow-hidden bg-base-300 text-base-content">
+<header class="shrink-0 flex items-baseline gap-3 px-6 py-3 border-b border-base-content/10 bg-base-200">
+  <h1 class="text-lg font-semibold text-primary">opensecretmask</h1>
+  <span class="text-sm opacity-60">local masking proxy &mdash; secrets never leave your machine</span>
+</header>
+<div id="dash" class="flex-1 min-h-0 flex flex-col" hx-get="/tab/overview" hx-trigger="load" hx-swap="outerHTML">
+  <div class="flex-1 grid place-items-center opacity-50">loading&hellip;</div>
+</div>
+</body>
+</html>{{end}}
