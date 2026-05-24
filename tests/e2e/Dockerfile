@@ -23,14 +23,17 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
 
 USER root
 COPY bin/osm-linux-amd64 /usr/local/bin/osm
-RUN chmod +x /usr/local/bin/osm \
- && osm --help >/dev/null
+COPY bin/mockupstream-linux-amd64 /usr/local/bin/mockupstream
+RUN chmod +x /usr/local/bin/osm /usr/local/bin/mockupstream \
+ && osm --help >/dev/null \
+ && mockupstream --help >/dev/null 2>&1 || true
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 USER osmtest
 ENV HOME=/home/osmtest
+ENV OSM_KEY=e2e-test-pass
 WORKDIR /workspace
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
