@@ -6,7 +6,6 @@
 internal/dashboard/node_modules/
 internal/dashboard/bun.lock
 
-# Local-only — not for git history
 .agents/
 .firecrawl/
 .recovered2/
@@ -16,8 +15,10 @@ internal/dashboard/bun.lock
 .simpletexts
 .env
 .env.test
+.claude/
+.git/
+docs/
+tests/e2e/bin/
+
 ONBOARDING.md
-docs/*
-!docs/THREAT_MODEL.md
-.claude
 skills-lock.json

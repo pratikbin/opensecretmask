@@ -155,11 +155,27 @@ masked — the plaintext is decrypted only when you explicitly reveal it.
 ## Development
 
 ```sh
-make build   # go build -o osm ./cmd/osm
-make test    # go test -race ./...
-make lint    # golangci-lint + gosec + govulncheck
-make all     # build + test + lint
+make build             # go build -o osm ./cmd/osm
+make test              # unit + race
+make test-integration  # testcontainers integration suite (Docker required)
+make test-e2e          # full e2e (Docker + ANTHROPIC_AUTH_TOKEN required)
+make lint              # golangci-lint + gosec + govulncheck
+make all               # build + test + lint
 ```
+
+Test layers:
+
+| Layer | Runs in | Docker | LLM creds |
+| --- | --- | --- | --- |
+| Unit | host process | no | no |
+| Integration | Linux container (built from `tests/integration/Dockerfile`) | yes | no |
+| E2E | Linux container with claude-code | yes | yes (`ANTHROPIC_AUTH_TOKEN`) |
+
+The integration suite uses an in-process mock LLM
+(`tests/internal/mockupstream`) whose TLS leaf is signed by the osm CA;
+the proxy auto-trusts its own CA upstream, so the mock round-trip works
+without any extra wiring. See `docs/THREAT_MODEL.md §3.8` for why that
+auto-trust is safe.
 
 Or directly:
 
