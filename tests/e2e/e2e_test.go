@@ -9,12 +9,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
+	tcexec "github.com/testcontainers/testcontainers-go/exec"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
@@ -59,6 +61,8 @@ func ensureImage(t *testing.T, ctx context.Context) {
 	require.NoError(t, err)
 	binPath := filepath.Join(root, "e2e", "bin", "osm-linux-amd64")
 	require.FileExists(t, binPath, "build the linux/amd64 osm binary first: GOOS=linux GOARCH=amd64 go build -o tests/e2e/bin/osm-linux-amd64 ./cmd/osm")
+	mockBinPath := filepath.Join(root, "e2e", "bin", "mockupstream-linux-amd64")
+	require.FileExists(t, mockBinPath, "build the linux/amd64 mockupstream binary first: GOOS=linux GOARCH=amd64 go build -o tests/e2e/bin/mockupstream-linux-amd64 ./tests/internal/mockupstream/cmd")
 }
 
 func newContainer(t *testing.T, ctx context.Context) testcontainers.Container {
@@ -67,12 +71,25 @@ func newContainer(t *testing.T, ctx context.Context) testcontainers.Container {
 	if envs["ANTHROPIC_AUTH_TOKEN"] == "" {
 		t.Skip("ANTHROPIC_AUTH_TOKEN not set in host env; skipping e2e")
 	}
+	return startE2EContainer(t, ctx, envs)
+}
 
+// newMockOnlyContainer is like newContainer but without the
+// ANTHROPIC_AUTH_TOKEN gate — used by tests that drive a hermetic mock
+// upstream (TestE2E_Run_MaskRoundTrip). Skipping these on missing creds
+// would silently hide regressions in the run flow.
+func newMockOnlyContainer(t *testing.T, ctx context.Context) testcontainers.Container {
+	t.Helper()
+	return startE2EContainer(t, ctx, nil)
+}
+
+func startE2EContainer(t *testing.T, ctx context.Context, env map[string]string) testcontainers.Container {
+	t.Helper()
 	req := testcontainers.ContainerRequest{
 		Image:      imageTag,
-		Env:        envs,
+		Env:        env,
 		Cmd:        []string{"sleep", "infinity"},
-		WaitingFor: wait.ForExec([]string{"test", "-f", "/home/osmtest/.opensecretmask/install.key"}).WithStartupTimeout(60 * time.Second),
+		WaitingFor: wait.ForExec([]string{"test", "-f", "/home/osmtest/.opensecretmask/ca-cert.pem"}).WithStartupTimeout(60 * time.Second),
 	}
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
@@ -93,7 +110,9 @@ type execResult struct {
 
 func execIn(t *testing.T, ctx context.Context, c testcontainers.Container, cmd ...string) execResult {
 	t.Helper()
-	code, reader, err := c.Exec(ctx, cmd)
+	// tcexec.Multiplexed() demuxes the docker exec stream so the reader is
+	// plain combined stdout+stderr instead of stdcopy-framed bytes.
+	code, reader, err := c.Exec(ctx, cmd, tcexec.Multiplexed())
 	require.NoError(t, err)
 	buf := &bytes.Buffer{}
 	_, _ = io.Copy(buf, reader)
@@ -169,6 +188,57 @@ func TestE2E_ClaudeReadsFile_MaskAppearsInAudit(t *testing.T) {
 	maps := catMappings(t, ctx, c)
 	require.Contains(t, maps, secret,
 		"mappings.json must record the secret claude saw via Read; got: %s", maps)
+}
+
+var e2eMaskLineRE = regexp.MustCompile(`mask sent to LLMs:\s*(\S+)`)
+var e2eMockListenRE = regexp.MustCompile(`listen=([0-9.]+:[0-9]+)`)
+
+// TestE2E_Run_MaskRoundTrip exercises `osm run` against a hermetic mock
+// upstream inside the e2e container. Unlike the existing tests it does not
+// touch the real Anthropic backend — the mock binary baked into the image
+// stands in for it, with its TLS leaf signed by the container's osm CA so
+// the proxy's auto-trust path is the only thing making the handshake work.
+func TestE2E_Run_MaskRoundTrip(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	ensureImage(t, ctx)
+
+	c := newMockOnlyContainer(t, ctx)
+
+	const secret = "sk-ant-api03-" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" +
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	addR := execIn(t, ctx, c, "bash", "-lc", fmt.Sprintf("osm add 'SECRET=%s'", secret))
+	require.Equal(t, 0, addR.exitCode, "osm add failed: %s", addR.stdout)
+	m := e2eMaskLineRE.FindStringSubmatch(addR.stdout)
+	require.NotNilf(t, m, "could not parse mask from osm add stdout:\n%s", addR.stdout)
+	mask := m[1]
+	require.NotEqual(t, secret, mask)
+
+	mockR := execIn(t, ctx, c, "bash", "-lc",
+		"nohup mockupstream --ca-dir /home/osmtest/.opensecretmask "+
+			">/tmp/mock.out 2>/tmp/mock.err & sleep 1; cat /tmp/mock.out")
+	require.Equal(t, 0, mockR.exitCode, "mockupstream launch failed: %s", mockR.stdout)
+	mm := e2eMockListenRE.FindStringSubmatch(mockR.stdout)
+	require.NotNilf(t, mm, "mockupstream did not log listen address:\n%s", mockR.stdout)
+	mockHost := mm[1]
+
+	body := fmt.Sprintf(`{"key":%q}`, secret)
+	curlScript := fmt.Sprintf(
+		`osm run --listen 127.0.0.1:1 --provider 127.0.0.1=anthropic -- `+
+			`curl -s --max-time 10 https://%s/v1/messages -d %q`,
+		mockHost, body)
+	curlR := execIn(t, ctx, c, "bash", "-lc", curlScript)
+	require.Equal(t, 0, curlR.exitCode, "osm run + curl failed: %s", curlR.stdout)
+
+	lastR := execIn(t, ctx, c, "bash", "-lc",
+		fmt.Sprintf("curl -s --max-time 5 -k https://%s/__last_body", mockHost))
+	require.Equal(t, 0, lastR.exitCode)
+	upstreamBody := lastR.stdout
+	require.NotContainsf(t, upstreamBody, secret, "real secret leaked upstream:\n%s", upstreamBody)
+	require.Containsf(t, upstreamBody, mask, "upstream missing mask %q:\n%s", mask, upstreamBody)
+
+	require.Containsf(t, curlR.stdout, secret, "client did not receive unmasked response: %s", curlR.stdout)
+	require.NotContainsf(t, curlR.stdout, mask, "mask leaked back to client (unmask did not run): %s", curlR.stdout)
 }
 
 func TestE2E_BashGate_DenyEgressWithMask(t *testing.T) {

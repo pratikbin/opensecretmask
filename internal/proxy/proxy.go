@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"io"
 	"log/slog"
 	"net"
@@ -188,7 +189,7 @@ func NewServer(cfg Config) *Server {
 	proxy.Tr = &http.Transport{
 		Proxy:              nil,
 		DisableCompression: true, // plaintext bodies for masking
-		TLSClientConfig:    cfg.UpstreamTLS,
+		TLSClientConfig:    upstreamTLSConfig(cfg),
 	}
 	proxy.ConnectDial = nil
 	proxy.ConnectDialWithReq = nil
@@ -415,6 +416,28 @@ func (s *Server) tunnelConnect(req *http.Request, client net.Conn, _ *goproxy.Pr
 	}()
 	wg.Wait()
 	close(done)
+}
+
+// upstreamTLSConfig returns the TLS config used to verify upstream LLM
+// endpoints. A nil cfg.UpstreamTLS keeps the prior default (system roots) and
+// additionally trusts cfg.CA — upstream certs signed by the local osm CA are
+// always accepted, so the same mock-upstream pattern used by internal tests
+// works for integration/e2e suites without exposing a CLI knob.
+//
+// An explicit cfg.UpstreamTLS is returned unchanged: callers wiring a custom
+// pool are responsible for including (or excluding) the osm CA themselves.
+func upstreamTLSConfig(cfg Config) *tls.Config {
+	if cfg.UpstreamTLS != nil {
+		return cfg.UpstreamTLS
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if cfg.CA != nil && cfg.CA.Cert != nil {
+		pool.AddCert(cfg.CA.Cert)
+	}
+	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
 }
 
 // hostOnly strips a :port suffix from a host[:port] string.

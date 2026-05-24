@@ -53,12 +53,14 @@ exact action and waits 5 seconds for Ctrl-C before running it. `osm init
 Makefile targets (preferred):
 
 ```sh
-make build   # go build -o osm ./cmd/osm
-make test    # go test -race ./...
-make lint    # golangci-lint + gosec + govulncheck
-make vuln    # govulncheck only
-make fix     # go fix ./... + gofmt -w .
-make all     # build + test + lint
+make build             # go build -o osm ./cmd/osm
+make test              # unit + race
+make test-integration  # testcontainers-driven integration suite (Docker req'd)
+make test-e2e          # full e2e in container (Docker + ANTHROPIC_AUTH_TOKEN)
+make lint              # golangci-lint + gosec + govulncheck
+make vuln              # govulncheck only
+make fix               # go fix ./... + gofmt -w .
+make all               # build + test + lint
 ```
 
 Or directly:
@@ -83,3 +85,16 @@ CI pipeline is in `.github/workflows/ci.yml` (build/test/lint/security jobs + we
 - Tests cover crypto round-trips, detector rules, mask/unmask round-trips,
   the proxy (real CA-MITM round-trip, JSON + split SSE), the dashboard, and
   the CLI.
+- Three test layers, distinct shapes:
+  | Layer | Where it runs | Docker | LLM creds | Build tag |
+  | --- | --- | --- | --- | --- |
+  | Unit / CLI | host process | no | no | none |
+  | Integration | testcontainers (Linux) | yes | no | `integration` |
+  | E2E | testcontainers (Linux) | yes | yes (ANTHROPIC_AUTH_TOKEN) | `e2e` |
+- `tests/integration/run_smoke_test.go` exercises `osm run` end-to-end
+  (env-var injection + mask round-trip via `osm run -- curl …`) against
+  the in-process mock at `tests/internal/mockupstream`. The mock mints
+  its TLS leaf from the osm CA, which the proxy auto-trusts upstream —
+  see `docs/THREAT_MODEL.md §3.8` for the rationale.
+- `tests/e2e/e2e_test.go::TestE2E_Run_MaskRoundTrip` exercises the same
+  flow inside the existing claude-code-bearing e2e container.
