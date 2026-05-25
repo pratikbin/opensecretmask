@@ -5,6 +5,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/pratikbin/opensecretmask/internal/shell"
 )
 
 // uninstallCmd is kept as a deprecated stub. osm no longer touches the system
@@ -31,6 +33,15 @@ To wipe state, either:
   osm uninstall --purge
 `, home)
 				return nil
+			}
+			// Strip shell rc source lines first so they do not point at the
+			// about-to-be-deleted script and break future shell startup.
+			cleared, sherr := shell.Uninstall()
+			if sherr != nil {
+				fmt.Fprintf(os.Stderr, "warn: shell uninstall: %v\n", sherr)
+			}
+			for _, rc := range cleared {
+				fmt.Printf("removed shell source line from %s\n", rc.Path)
 			}
 			if err := os.RemoveAll(home); err != nil {
 				return fmt.Errorf("purge failed: %w", err)
