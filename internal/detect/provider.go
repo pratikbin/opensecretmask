@@ -16,5 +16,6 @@ func DefaultProviders() []Provider {
 	return []Provider{
 		builtinProvider{},
 		llmProvider{},
+		cloudProvider{},
 	}
 }
