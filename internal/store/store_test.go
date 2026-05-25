@@ -23,7 +23,7 @@ func TestInitAndUnlock(t *testing.T) {
 	if err != nil || init {
 		t.Fatalf("fresh db should be uninitialized: init=%v err=%v", init, err)
 	}
-	if err := s.InitCrypto(t.Context(),"master-pass"); err != nil {
+	if err := s.InitCrypto(t.Context(), "master-pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
 	if !s.Unlocked() {
@@ -33,7 +33,7 @@ func TestInitAndUnlock(t *testing.T) {
 	if err != nil || !init {
 		t.Fatalf("db should be initialized after InitCrypto: init=%v err=%v", init, err)
 	}
-	if err := s.InitCrypto(t.Context(),"again"); err == nil {
+	if err := s.InitCrypto(t.Context(), "again"); err == nil {
 		t.Fatal("InitCrypto on an initialized db should fail")
 	}
 }
@@ -44,7 +44,7 @@ func TestUnlockWrongPassphrase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if err := s.InitCrypto(t.Context(),"right-pass"); err != nil {
+	if err := s.InitCrypto(t.Context(), "right-pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
 	s.Close()
@@ -54,10 +54,10 @@ func TestUnlockWrongPassphrase(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer s2.Close()
-	if err := s2.Unlock(t.Context(),"wrong-pass"); !errors.Is(err, ErrWrongPassphrase) {
+	if err := s2.Unlock(t.Context(), "wrong-pass"); !errors.Is(err, ErrWrongPassphrase) {
 		t.Fatalf("expected ErrWrongPassphrase, got %v", err)
 	}
-	if err := s2.Unlock(t.Context(),"right-pass"); err != nil {
+	if err := s2.Unlock(t.Context(), "right-pass"); err != nil {
 		t.Fatalf("Unlock with right pass: %v", err)
 	}
 	if !s2.Unlocked() {
@@ -67,14 +67,14 @@ func TestUnlockWrongPassphrase(t *testing.T) {
 
 func TestLockedRejectsSecretOps(t *testing.T) {
 	s := openTestStore(t)
-	if _, err := s.PutSecret(t.Context(),Secret{Original: "x", Mask: "m"}); !errors.Is(err, ErrLocked) {
+	if _, err := s.PutSecret(t.Context(), Secret{Original: "x", Mask: "m"}); !errors.Is(err, ErrLocked) {
 		t.Fatalf("expected ErrLocked from PutSecret on locked store, got %v", err)
 	}
 }
 
 func TestPutGetSecret(t *testing.T) {
 	s := openTestStore(t)
-	if err := s.InitCrypto(t.Context(),"pass"); err != nil {
+	if err := s.InitCrypto(t.Context(), "pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
 	sec := Secret{
@@ -84,12 +84,12 @@ func TestPutGetSecret(t *testing.T) {
 		Mask:     "sk-ant-api03-maskedAAAA1234567890",
 		Shape:    "sk-ant-api03-{32}",
 	}
-	id, err := s.PutSecret(t.Context(),sec)
+	id, err := s.PutSecret(t.Context(), sec)
 	if err != nil {
 		t.Fatalf("PutSecret: %v", err)
 	}
 
-	got, err := s.SecretByMask(t.Context(),sec.Mask)
+	got, err := s.SecretByMask(t.Context(), sec.Mask)
 	if err != nil {
 		t.Fatalf("SecretByMask: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestPutGetSecret(t *testing.T) {
 		t.Fatalf("id mismatch: got %d want %d", got.ID, id)
 	}
 
-	byOrig, err := s.SecretByOriginal(t.Context(),sec.Original)
+	byOrig, err := s.SecretByOriginal(t.Context(), sec.Original)
 	if err != nil {
 		t.Fatalf("SecretByOriginal: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestPutGetSecret(t *testing.T) {
 
 func TestPutSecretDedup(t *testing.T) {
 	s := openTestStore(t)
-	if err := s.InitCrypto(t.Context(),"pass"); err != nil {
+	if err := s.InitCrypto(t.Context(), "pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
 	sec := Secret{
@@ -119,12 +119,12 @@ func TestPutSecretDedup(t *testing.T) {
 		Original: "duplicate-secret-value",
 		Mask:     "mask-aaaa", Shape: "{22}",
 	}
-	id1, err := s.PutSecret(t.Context(),sec)
+	id1, err := s.PutSecret(t.Context(), sec)
 	if err != nil {
 		t.Fatalf("first PutSecret: %v", err)
 	}
 	sec.Mask = "mask-bbbb" // same Original — must dedup to the first row
-	id2, err := s.PutSecret(t.Context(),sec)
+	id2, err := s.PutSecret(t.Context(), sec)
 	if err != nil {
 		t.Fatalf("second PutSecret: %v", err)
 	}
@@ -135,10 +135,10 @@ func TestPutSecretDedup(t *testing.T) {
 
 func TestListRevealTouch(t *testing.T) {
 	s := openTestStore(t)
-	if err := s.InitCrypto(t.Context(),"pass"); err != nil {
+	if err := s.InitCrypto(t.Context(), "pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
-	id, err := s.PutSecret(t.Context(),Secret{
+	id, err := s.PutSecret(t.Context(), Secret{
 		Name: "K", Source: "registered",
 		Original: "reveal-me", Mask: "m1", Shape: "{9}",
 	})
@@ -154,12 +154,12 @@ func TestListRevealTouch(t *testing.T) {
 		t.Fatalf("unexpected ListSecrets result: %+v", metas)
 	}
 
-	got, err := s.RevealSecret(t.Context(),id)
+	got, err := s.RevealSecret(t.Context(), id)
 	if err != nil || got != "reveal-me" {
 		t.Fatalf("RevealSecret: got %q err %v", got, err)
 	}
 
-	if err := s.TouchSecret(t.Context(),id); err != nil {
+	if err := s.TouchSecret(t.Context(), id); err != nil {
 		t.Fatalf("TouchSecret: %v", err)
 	}
 	metas, _ = s.ListSecrets(t.Context())

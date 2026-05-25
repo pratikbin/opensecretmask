@@ -7,30 +7,30 @@ import (
 
 func TestStatsAndListRequests(t *testing.T) {
 	s := openTestStore(t)
-	if err := s.InitCrypto(t.Context(),"pass"); err != nil {
+	if err := s.InitCrypto(t.Context(), "pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
 
-	if _, err := s.PutSecret(t.Context(),Secret{
+	if _, err := s.PutSecret(t.Context(), Secret{
 		Name: "K1", Source: "registered",
 		Original: "registered-secret-value", Mask: "m1", Shape: "x",
 	}); err != nil {
 		t.Fatalf("PutSecret registered: %v", err)
 	}
-	if _, err := s.PutSecret(t.Context(),Secret{
+	if _, err := s.PutSecret(t.Context(), Secret{
 		Name: "K2", Source: "detected",
 		Original: "detected-secret-value", Mask: "m2", Shape: "y",
 	}); err != nil {
 		t.Fatalf("PutSecret detected: %v", err)
 	}
 
-	if _, err := s.LogRequest(t.Context(),RequestRecord{
+	if _, err := s.LogRequest(t.Context(), RequestRecord{
 		Provider: "anthropic", Host: "api.anthropic.com",
 		Method: "POST", Path: "/v1/messages", Status: 200, Masked: 2,
 	}, nil); err != nil {
 		t.Fatalf("LogRequest 1: %v", err)
 	}
-	if _, err := s.LogRequest(t.Context(),RequestRecord{
+	if _, err := s.LogRequest(t.Context(), RequestRecord{
 		Provider: "openai", Host: "api.openai.com",
 		Method: "POST", Path: "/v1/chat/completions", Status: 200, Masked: 0,
 	}, nil); err != nil {
@@ -48,7 +48,7 @@ func TestStatsAndListRequests(t *testing.T) {
 		t.Fatalf("request stats wrong: %+v", st)
 	}
 
-	rows, err := s.ListRequests(t.Context(),10)
+	rows, err := s.ListRequests(t.Context(), 10)
 	if err != nil {
 		t.Fatalf("ListRequests: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestStatsAndListRequests(t *testing.T) {
 
 func TestStatsEmpty(t *testing.T) {
 	s := openTestStore(t)
-	if err := s.InitCrypto(t.Context(),"pass"); err != nil {
+	if err := s.InitCrypto(t.Context(), "pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
 	st, err := s.Stats(t.Context())
@@ -76,10 +76,10 @@ func TestStatsEmpty(t *testing.T) {
 
 func TestGetRequestAndPurge(t *testing.T) {
 	s := openTestStore(t)
-	if err := s.InitCrypto(t.Context(),"pass"); err != nil {
+	if err := s.InitCrypto(t.Context(), "pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
-	secID, err := s.PutSecret(t.Context(),Secret{
+	secID, err := s.PutSecret(t.Context(), Secret{
 		Name: "K", Source: "registered",
 		Original: "real-secret-value", Mask: "MASKED01", Shape: "x",
 	})
@@ -88,7 +88,7 @@ func TestGetRequestAndPurge(t *testing.T) {
 	}
 
 	body := []byte(`{"k":"MASKED01"}`)
-	reqID, err := s.LogRequest(t.Context(),RequestRecord{
+	reqID, err := s.LogRequest(t.Context(), RequestRecord{
 		Provider: "anthropic", Host: "api.anthropic.com",
 		Method: "POST", Path: "/v1/messages", Status: 200, Masked: 1,
 		ReqBody: body, RespBody: body,
@@ -97,7 +97,7 @@ func TestGetRequestAndPurge(t *testing.T) {
 		t.Fatalf("LogRequest: %v", err)
 	}
 
-	d, err := s.GetRequest(t.Context(),reqID)
+	d, err := s.GetRequest(t.Context(), reqID)
 	if err != nil {
 		t.Fatalf("GetRequest: %v", err)
 	}
@@ -109,15 +109,15 @@ func TestGetRequestAndPurge(t *testing.T) {
 	}
 
 	// A one-day window leaves the just-logged request untouched.
-	if n, err := s.PurgeRequestsOlderThan(t.Context(),24 * time.Hour); err != nil || n != 0 {
+	if n, err := s.PurgeRequestsOlderThan(t.Context(), 24*time.Hour); err != nil || n != 0 {
 		t.Fatalf("purge fresh request: n=%d err=%v", n, err)
 	}
 	// A negative window puts the cutoff in the future, matching every row;
 	// the delete cascades to request_secrets.
-	if n, err := s.PurgeRequestsOlderThan(t.Context(),-time.Hour); err != nil || n != 1 {
+	if n, err := s.PurgeRequestsOlderThan(t.Context(), -time.Hour); err != nil || n != 1 {
 		t.Fatalf("purge all: n=%d err=%v", n, err)
 	}
-	if _, err := s.GetRequest(t.Context(),reqID); err == nil {
+	if _, err := s.GetRequest(t.Context(), reqID); err == nil {
 		t.Fatal("GetRequest should fail after the request is purged")
 	}
 }

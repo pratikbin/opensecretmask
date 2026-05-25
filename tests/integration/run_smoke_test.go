@@ -19,10 +19,10 @@ import (
 )
 
 // newIntegrationContainer builds the integration image (or reuses it via
-// docker's layer cache) and starts a disposable container. `osm init
-// --no-trust` runs inside the container so subsequent commands have a CA
-// and key material. The container's lifetime is bound to the test via
-// t.Cleanup.
+// docker's layer cache) and starts a disposable container. `osm init` runs
+// inside the container so subsequent commands have a CA and key material;
+// osm no longer touches the system trust store, so no flag is needed. The
+// container's lifetime is bound to the test via t.Cleanup.
 //
 // The image is built from tests/integration/Dockerfile with the repo root as
 // build context, so the multi-stage builder compiles osm and mockupstream
@@ -46,7 +46,7 @@ func newIntegrationContainer(t *testing.T, ctx context.Context) testcontainers.C
 	require.NoError(t, err, "start integration container")
 	t.Cleanup(func() { _ = c.Terminate(context.Background()) })
 
-	r := runIn(t, ctx, c, "osm", "init", "--no-trust")
+	r := runIn(t, ctx, c, "osm", "init")
 	require.Equal(t, 0, r.exitCode, "osm init failed: stdout=%s stderr=%s", r.stdout, r.stderr)
 	return c
 }
@@ -134,7 +134,9 @@ func TestIntegrationRun_MaskRoundTrip(t *testing.T) {
 	require.NotEqual(t, secret, mask, "mask must differ from real secret")
 
 	mockR := shellIn(t, ctx, c,
-		`nohup mockupstream --ca-dir /root/.opensecretmask >/tmp/mock.out 2>/tmp/mock.err & sleep 1; cat /tmp/mock.out`)
+		`nohup mockupstream --ca-dir /root/.opensecretmask >/tmp/mock.out 2>/tmp/mock.err &
+		 for i in $(seq 1 50); do grep -q "listen=" /tmp/mock.out 2>/dev/null && break; sleep 0.1; done
+		 cat /tmp/mock.out`)
 	require.Equal(t, 0, mockR.exitCode, "mockupstream launch failed: stdout=%s", mockR.stdout)
 	mockListenRE := regexp.MustCompile(`listen=([0-9.]+:[0-9]+)`)
 	mm := mockListenRE.FindStringSubmatch(mockR.stdout)

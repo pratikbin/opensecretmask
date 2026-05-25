@@ -34,7 +34,7 @@ func newBenchMasker(b *testing.B) *Masker {
 		b.Fatalf("store.Open: %v", err)
 	}
 	b.Cleanup(func() { _ = st.Close() })
-	if err := st.InitCrypto(b.Context(),"test-pass"); err != nil {
+	if err := st.InitCrypto(b.Context(), "test-pass"); err != nil {
 		b.Fatalf("InitCrypto: %v", err)
 	}
 	det, err := detect.New(detect.Config{})
@@ -54,7 +54,7 @@ func BenchmarkMaskBodyNoSecret(b *testing.B) {
 		"ghp_016c0d3c8e5f4a2b9d7e6f1a3c5b8d9e0f2a4c",
 		"sk-ant-api03-FAKEEXAMPLEKEYVALUE1234567890",
 	} {
-		if _, err := m.Register(b.Context(),"bench", v); err != nil {
+		if _, err := m.Register(b.Context(), "bench", v); err != nil {
 			b.Fatalf("Register: %v", err)
 		}
 	}
@@ -67,7 +67,7 @@ func BenchmarkMaskBodyNoSecret(b *testing.B) {
 		`{"role":"user","content":"Now show an example with a worker pool."}]}`)
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, _, err := m.MaskBody(b.Context(),body); err != nil {
+		if _, _, err := m.MaskBody(b.Context(), body); err != nil {
 			b.Fatalf("MaskBody: %v", err)
 		}
 	}

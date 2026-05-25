@@ -35,18 +35,19 @@ the responses. Real credentials never reach the provider.
 - Headers are never masked — the agent's real `Authorization` / `x-api-key`
   is the upstream credential and must pass through.
 
-## `osm init` and privileges
+## `osm init` and trust model
 
-`osm init` creates the state dir, encrypted store, and a local CA, then
-**installs that CA into the system trust store** — the only step needing
-administrator access:
+`osm init` creates the state dir, encrypted store, and a local CA. It does
+**not** modify the system trust store and needs **no administrator access**.
 
-- macOS: `sudo security add-trusted-cert -d -k /Library/Keychains/System.keychain ca-cert.pem`
-- Linux: cert into `/usr/local/share/ca-certificates/` + `sudo update-ca-certificates`
+Trust is per-process: `osm run -- <cmd>` exports `HTTPS_PROXY`,
+`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, and
+`CURL_CA_BUNDLE` only for the child command. Nothing outside that one
+process trusts the osm CA. This is the only supported path — `osm run -- claude`
+is the recommended entry point.
 
-The install is required so intercepted TLS is trusted. `osm init` prints the
-exact action and waits 5 seconds for Ctrl-C before running it. `osm init
---no-trust` skips the install (CA file is still written).
+`osm uninstall` is deprecated (nothing to uninstall). To wipe state:
+`rm -rf $OPENSECRETMASK_HOME` or `osm uninstall --purge`.
 
 ## Build, test, lint
 
