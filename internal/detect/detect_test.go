@@ -113,6 +113,26 @@ func TestLLMProviderMatches(t *testing.T) {
 	}
 }
 
+func TestGitProviderMatches(t *testing.T) {
+	d := newDetector(t, Config{})
+	cases := []struct {
+		body string
+		rule string
+	}{
+		{`glptt-` + repeat("a", 40), "GitLab Pipeline Trigger Token"},
+		{`GR1348941` + repeat("a", 20), "GitLab Runner Registration Token"},
+		{`glft-` + repeat("a", 20), "GitLab Feed Token"},
+		{`glimt-` + repeat("a", 25), "GitLab Incoming Mail Token"},
+		{`glagent-` + repeat("a", 50), "GitLab Kubernetes Agent Token"},
+		{`glcbt-` + repeat("a", 30), "GitLab CI/CD Job Token"},
+		{`gldt-` + repeat("a", 20), "GitLab Deploy Token"},
+		{`glsoat-` + repeat("a", 30), "GitLab SCIM Token"},
+	}
+	for _, tc := range cases {
+		assertRuleFires(t, d, tc.body, tc.rule)
+	}
+}
+
 func TestChatProviderMatches(t *testing.T) {
 	d := newDetector(t, Config{})
 	cases := []struct {
