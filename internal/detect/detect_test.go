@@ -112,3 +112,27 @@ func TestLLMProviderMatches(t *testing.T) {
 		assertRuleFires(t, d, tc.body, tc.rule)
 	}
 }
+
+func TestCloudProviderMatches(t *testing.T) {
+	d := newDetector(t, Config{})
+	cases := []struct {
+		body string
+		rule string
+	}{
+		{`AGE-SECRET-KEY-1QPZRY9X8GF2TVDW0S3JN54KHCE6MUA7LQPZRY9X8GF2TVDW0S3JN54KHCE6MUA7L`, "Age Secret Key"},
+		{`{"id":"LTAIabcdefghij0123456789"}`, "Alibaba Access Key ID"},
+		{`hdr=AKCp` + repeat("a", 69), "Artifactory API Key"},
+		{`cf:v1.0-abcdef0123456789abcdef01-` + repeat("a", 146), "Cloudflare Origin CA Key"},
+		{`{"t":"dp.pt.` + repeat("a", 40) + `"}`, "Doppler Token"},
+		{`x:dt0c01.` + repeat("A", 24) + `.` + repeat("A", 64), "Dynatrace API Token"},
+		{`FLWSECK_TEST-` + repeat("a", 32) + `-X`, "Flutterwave Secret Key"},
+		{`glc_` + repeat("a", 40), "Grafana Cloud API Token"},
+		{`glsa_` + repeat("a", 32) + `_abcdef01`, "Grafana Service Account Token"},
+		{`HRKU-AA` + repeat("a", 25), "Heroku API Key v2"},
+		{`dckr_pat_` + repeat("a", 30), "Docker PAT"},
+		{`nfp_` + repeat("a", 42), "Netlify Access Token"},
+	}
+	for _, tc := range cases {
+		assertRuleFires(t, d, tc.body, tc.rule)
+	}
+}
