@@ -17,7 +17,7 @@ func newMasker(t *testing.T) (*Masker, *store.Store) {
 		t.Fatalf("store.Open: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
-	if err := st.InitCrypto(t.Context(),"test-pass"); err != nil {
+	if err := st.InitCrypto(t.Context(), "test-pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
 	det, err := detect.New(detect.Config{})
@@ -32,7 +32,7 @@ func TestMaskUnmaskRoundTrip(t *testing.T) {
 	secret := "sk-ant-api03-abcdef1234567890ABCDEFGH"
 	orig := []byte(`{"content":"my key ` + secret + ` stays secret"}`)
 
-	masked, used, err := m.MaskBody(t.Context(),orig)
+	masked, used, err := m.MaskBody(t.Context(), orig)
 	if err != nil {
 		t.Fatalf("MaskBody: %v", err)
 	}
@@ -59,11 +59,11 @@ func TestMaskStableAcrossCalls(t *testing.T) {
 	m, _ := newMasker(t)
 	body := []byte("ghp_abcdefghijklmnopqrstuvwxyz0123456789")
 
-	first, used1, err := m.MaskBody(t.Context(),body)
+	first, used1, err := m.MaskBody(t.Context(), body)
 	if err != nil {
 		t.Fatalf("MaskBody 1: %v", err)
 	}
-	second, used2, err := m.MaskBody(t.Context(),body)
+	second, used2, err := m.MaskBody(t.Context(), body)
 	if err != nil {
 		t.Fatalf("MaskBody 2: %v", err)
 	}
@@ -79,14 +79,14 @@ func TestMaskRegisteredSecret(t *testing.T) {
 	m, st := newMasker(t)
 	const orig = "hunter2-plain-pw"
 	const mask = "XXXXXXX-xxxxx-xx"
-	if _, err := st.PutSecret(t.Context(),store.Secret{
+	if _, err := st.PutSecret(t.Context(), store.Secret{
 		Name: "DB_PASSWORD", Source: "registered",
 		Original: orig, Mask: mask, Shape: "aaaaaa9-aaaaa-aa",
 	}); err != nil {
 		t.Fatalf("PutSecret: %v", err)
 	}
 
-	masked, used, err := m.MaskBody(t.Context(),[]byte("connect with " + orig + " now"))
+	masked, used, err := m.MaskBody(t.Context(), []byte("connect with "+orig+" now"))
 	if err != nil {
 		t.Fatalf("MaskBody: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestMaskRegisteredSecret(t *testing.T) {
 func TestMaskNothingToMask(t *testing.T) {
 	m, _ := newMasker(t)
 	body := []byte(`{"content":"just an ordinary sentence with no secrets"}`)
-	masked, used, err := m.MaskBody(t.Context(),body)
+	masked, used, err := m.MaskBody(t.Context(), body)
 	if err != nil {
 		t.Fatalf("MaskBody: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestMaskNothingToMask(t *testing.T) {
 func TestMaskBodyJSONPreservesEscapes(t *testing.T) {
 	m, _ := newMasker(t)
 	const orig = "hunter2-very-secret-value"
-	sec, err := m.Register(t.Context(),"DB_PASSWORD", orig)
+	sec, err := m.Register(t.Context(), "DB_PASSWORD", orig)
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestMaskBodyJSONPreservesEscapes(t *testing.T) {
 		t.Fatalf("marshal body: %v", err)
 	}
 
-	masked, used, err := m.MaskBody(t.Context(),body)
+	masked, used, err := m.MaskBody(t.Context(), body)
 	if err != nil {
 		t.Fatalf("MaskBody: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestMaskBodyJSONNested(t *testing.T) {
 		t.Fatalf("marshal body: %v", err)
 	}
 
-	masked, used, err := m.MaskBody(t.Context(),body)
+	masked, used, err := m.MaskBody(t.Context(), body)
 	if err != nil {
 		t.Fatalf("MaskBody: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestMaskBodyJSONNested(t *testing.T) {
 func TestMaskerRegister(t *testing.T) {
 	m, st := newMasker(t)
 
-	sec, err := m.Register(t.Context(),"DB_PASSWORD", "hunter2-very-secret-value")
+	sec, err := m.Register(t.Context(), "DB_PASSWORD", "hunter2-very-secret-value")
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestMaskerRegister(t *testing.T) {
 		t.Fatalf("mask not format-preserving: %q", sec.Mask)
 	}
 
-	again, err := m.Register(t.Context(),"DB_PASSWORD", "hunter2-very-secret-value")
+	again, err := m.Register(t.Context(), "DB_PASSWORD", "hunter2-very-secret-value")
 	if err != nil {
 		t.Fatalf("Register (repeat): %v", err)
 	}

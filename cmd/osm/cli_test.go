@@ -33,7 +33,7 @@ func openHomeStore(t *testing.T, home, pass string) *store.Store {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if err := st.Unlock(t.Context(),pass); err != nil {
+	if err := st.Unlock(t.Context(), pass); err != nil {
 		t.Fatalf("unlock store: %v", err)
 	}
 	return st
@@ -44,13 +44,13 @@ func TestCLIInitAddStatusDoctor(t *testing.T) {
 	t.Setenv("OPENSECRETMASK_HOME", home)
 	t.Setenv("OSM_KEY", "test-passphrase")
 
-	mustRunOSM(t, "init", "--no-trust")
+	mustRunOSM(t, "init")
 	for _, f := range []string{"ca-cert.pem", "ca-key.pem", "osm.db"} {
 		if _, err := os.Stat(filepath.Join(home, f)); err != nil {
 			t.Fatalf("init did not create %s: %v", f, err)
 		}
 	}
-	if err := runOSM(t, "init", "--no-trust"); err == nil {
+	if err := runOSM(t, "init"); err == nil {
 		t.Fatal("re-running init on an initialized home should fail")
 	}
 
@@ -76,7 +76,7 @@ func TestCLIPreload(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("OPENSECRETMASK_HOME", home)
 	t.Setenv("OSM_KEY", "pass")
-	mustRunOSM(t, "init", "--no-trust")
+	mustRunOSM(t, "init")
 
 	envDir := t.TempDir()
 	envContent := "API_KEY=sk-ant-api03-fromenvfile1234567\n" +
@@ -120,7 +120,7 @@ func TestCLIRunSpawnsOwnProxy(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("OPENSECRETMASK_HOME", home)
 	t.Setenv("OSM_KEY", "pass")
-	mustRunOSM(t, "init", "--no-trust")
+	mustRunOSM(t, "init")
 	// Port 1 is reliably refused — with no proxy to reuse, 'osm run' must
 	// spawn its own ephemeral proxy and still run the command to completion.
 	if err := runOSM(t, "run", "--listen", "127.0.0.1:1", "echo", "hi"); err != nil {

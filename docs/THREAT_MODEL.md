@@ -164,10 +164,10 @@ serve corporate LLM gateways behind a private root.
 The expansion has no practical effect on a remote network attacker:
 - The osm CA private key lives at `~/.opensecretmask/ca-key.pem`, mode
   `0600`. Anyone who can read it already owns the client-side trust
-  chain (the same key is installed in the system trust store by
-  `osm init`), so they can already MITM every TLS handshake the user
-  makes — adding the same CA to the upstream pool grants no new
-  capability.
+  chain (every `osm run`-spawned process trusts the matching CA via
+  `NODE_EXTRA_CA_CERTS` / `SSL_CERT_FILE`), so they can already MITM
+  every TLS handshake those processes make — adding the same CA to the
+  upstream pool grants no new capability.
 - A network attacker without that key cannot mint a cert the proxy will
   accept on either side.
 
