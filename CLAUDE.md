@@ -8,13 +8,14 @@ the responses. Real credentials never reach the provider.
 
 | Package | Role |
 | --- | --- |
-| `cmd/osm` | cobra CLI: `init`, `uninstall`, `proxy`, `run`, `add`, `preload`, `status`, `doctor` |
+| `cmd/osm` | cobra CLI: `init`, `uninstall`, `proxy`, `run`, `add`, `preload`, `status`, `doctor`, `shell` |
 | `internal/crypto` | AES-256-GCM + Argon2id key derivation |
 | `internal/store` | encrypted SQLite (`modernc.org/sqlite`, no cgo) |
 | `internal/detect` | 45 vendored credential regexes + Shannon entropy |
 | `internal/mask` | format-preserving garble, masker, streaming unmasker |
 | `internal/proxy` | `goproxy` CA-MITM, route-by-host, request/response masking |
 | `internal/dashboard` | embedded htmx + daisyUI web UI: tabbed overview / requests / secrets, per-request debug view |
+| `internal/shell` | embedded posix-shell init script + rc-file installer; modelled on AikidoSec/safe-chain |
 
 ## Key design
 
@@ -48,6 +49,24 @@ is the recommended entry point.
 
 `osm uninstall` is deprecated (nothing to uninstall). To wipe state:
 `rm -rf $OPENSECRETMASK_HOME` or `osm uninstall --purge`.
+
+## Shell integration (`osm shell`)
+
+`osm shell install` makes typing bare `claude`, `codex`, or `pi` transparently
+run `osm run -- <cmd>`. It writes one source line to `~/.zshrc` and `~/.bashrc`
+(whichever exist) pointing at `$OPENSECRETMASK_HOME/scripts/init-posix.sh`
+(embedded via `//go:embed`). The script defines shell functions whose names
+shadow the PATH lookup; absence of `osm` on PATH falls through to the bare
+command with a yellow `Warning:`. Stderr banner suppressible via `OSM_QUIET=1`.
+
+`osm shell uninstall` strips the source line, with the same safety guards used
+by safe-chain (line length cap, no embedded newlines). A one-shot pre-osm
+backup is written to `<rc>.osm.bak` and never overwritten on subsequent
+installs. `osm shell status` reports per-rc-file state.
+
+Note: codex / pi currently bypass the masking proxy (websocket / non-
+`HTTPS_PROXY` transport per `osm tool coverage`). The wrapper is in place
+ready for when those transports are intercepted.
 
 ## Build, test, lint
 

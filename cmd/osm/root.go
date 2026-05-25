@@ -21,6 +21,7 @@ func rootCmd() *cobra.Command {
 		preloadCmd(),
 		statusCmd(),
 		doctorCmd(),
+		shellCmd(),
 	)
 	return root
 }

@@ -45,6 +45,16 @@ export SSL_CERT_FILE=~/.opensecretmask/ca-cert.pem         # some Python / Go to
 ```
 
 Or skip both the exports **and** `osm proxy` — `osm run` is self-contained.
+
+Or install shell integration once and just type the bare command:
+
+```sh
+osm shell install         # wires ~/.zshrc and ~/.bashrc (write-once .osm.bak backup)
+claude                    # auto-runs `osm run -- claude`
+```
+
+Wrapped tools: `claude`, `codex`, `pi`. Suppress the per-invocation banner
+with `OSM_QUIET=1`. Remove with `osm shell uninstall`.
 It reuses a running `osm proxy` if one is up, otherwise starts its own
 proxy and dashboard on ephemeral ports for just that command and tears
 them down on exit. The per-process env vars make Node, Python, and curl
@@ -102,6 +112,9 @@ process is affected. This is the recommended way to use osm.
 | `osm preload [dir]` | register every value found in `.env` files |
 | `osm status` | show stored secrets and proxy activity |
 | `osm doctor` | check the installation |
+| `osm shell install` | wrap `claude`/`codex`/`pi` so the bare command runs through `osm run` |
+| `osm shell uninstall` | remove the source line from `~/.zshrc` / `~/.bashrc` |
+| `osm shell status` | report shell integration state per rc file |
 
 `osm proxy` intercepts the major LLM provider API hosts by default —
 Anthropic, OpenAI, Google Gemini/Vertex, xAI, Mistral, Cohere, Perplexity,
