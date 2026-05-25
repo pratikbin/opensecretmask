@@ -113,6 +113,21 @@ func TestLLMProviderMatches(t *testing.T) {
 	}
 }
 
+func TestChatProviderMatches(t *testing.T) {
+	d := newDetector(t, Config{})
+	cases := []struct {
+		body string
+		rule string
+	}{
+		{`{"t":"xoxe.xoxp-1-` + repeat("a", 50) + `"}`, "Slack Config Access Token"},
+		{`xoxe-1-` + repeat("a", 50), "Slack Config Refresh Token"},
+		{`https://hooks.slack.com/services/T01234567/B01234567/` + repeat("a", 24), "Slack Webhook URL"},
+	}
+	for _, tc := range cases {
+		assertRuleFires(t, d, tc.body, tc.rule)
+	}
+}
+
 func TestCloudProviderMatches(t *testing.T) {
 	d := newDetector(t, Config{})
 	cases := []struct {
