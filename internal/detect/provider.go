@@ -18,5 +18,6 @@ func DefaultProviders() []Provider {
 		llmProvider{},
 		cloudProvider{},
 		chatProvider{},
+		gitProvider{},
 	}
 }
