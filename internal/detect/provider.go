@@ -17,5 +17,6 @@ func DefaultProviders() []Provider {
 		builtinProvider{},
 		llmProvider{},
 		cloudProvider{},
+		chatProvider{},
 	}
 }
