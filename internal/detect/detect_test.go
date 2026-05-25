@@ -13,8 +13,12 @@ func newDetector(t *testing.T, cfg Config) *Detector {
 
 func TestAllRulesCompile(t *testing.T) {
 	d := newDetector(t, Config{})
-	if d.RuleCount() != len(builtinRules) {
-		t.Fatalf("compiled %d rules, want %d", d.RuleCount(), len(builtinRules))
+	var want int
+	for _, p := range DefaultProviders() {
+		want += len(p.Rules())
+	}
+	if d.RuleCount() != want {
+		t.Fatalf("compiled %d rules, want %d", d.RuleCount(), want)
 	}
 	if d.RuleCount() < 40 {
 		t.Fatalf("expected the full vendored rule set, got only %d", d.RuleCount())
@@ -72,5 +76,39 @@ func TestEntropyLayerToggle(t *testing.T) {
 	got := on.Scan(body)
 	if len(got) != 1 || got[0].Rule != "entropy" {
 		t.Fatalf("entropy enabled: got %+v, want 1 entropy finding", got)
+	}
+}
+
+func repeat(s string, n int) string {
+	out := make([]byte, 0, len(s)*n)
+	for i := 0; i < n; i++ {
+		out = append(out, s...)
+	}
+	return string(out)
+}
+
+func assertRuleFires(t *testing.T, d *Detector, body, rule string) {
+	t.Helper()
+	got := d.Scan([]byte(body))
+	for _, f := range got {
+		if f.Rule == rule {
+			return
+		}
+	}
+	t.Errorf("body %q: findings %+v missing rule %q", body, got, rule)
+}
+
+func TestLLMProviderMatches(t *testing.T) {
+	d := newDetector(t, Config{})
+	cases := []struct {
+		body string
+		rule string
+	}{
+		{`Authorization: Bearer pplx-` + repeat("a", 45), "Perplexity API Key"},
+		{`{"k":"ABSK` + repeat("A", 110) + `"}`, "AWS Bedrock Long-Lived Key"},
+		{`X-Bedrock: bedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29t`, "AWS Bedrock Short-Lived Key"},
+	}
+	for _, tc := range cases {
+		assertRuleFires(t, d, tc.body, tc.rule)
 	}
 }

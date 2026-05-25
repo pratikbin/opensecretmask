@@ -15,5 +15,6 @@ type Provider interface {
 func DefaultProviders() []Provider {
 	return []Provider{
 		builtinProvider{},
+		llmProvider{},
 	}
 }
