@@ -13,8 +13,8 @@ func newDetector(t *testing.T, cfg Config) *Detector {
 
 func TestAllRulesCompile(t *testing.T) {
 	d := newDetector(t, Config{})
-	if d.RuleCount() != len(rules) {
-		t.Fatalf("compiled %d rules, want %d", d.RuleCount(), len(rules))
+	if d.RuleCount() != len(builtinRules) {
+		t.Fatalf("compiled %d rules, want %d", d.RuleCount(), len(builtinRules))
 	}
 	if d.RuleCount() < 40 {
 		t.Fatalf("expected the full vendored rule set, got only %d", d.RuleCount())

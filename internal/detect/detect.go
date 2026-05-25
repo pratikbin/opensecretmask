@@ -1,5 +1,6 @@
-// Package detect finds secrets in request bodies using vendored credential
-// regexes plus a Shannon-entropy heuristic for unknown high-entropy tokens.
+// Package detect finds secrets in request bodies. Detection rules are
+// supplied by Providers (see provider.go); a Shannon-entropy heuristic
+// catches unknown high-entropy tokens when enabled in Config.
 package detect
 
 import (
@@ -13,9 +14,10 @@ import (
 	"github.com/sourcegraph/conc/pool"
 )
 
-// parallelScanMinBody is the body size (bytes) at or above which Scan fans the
-// 48 regex rules out across goroutines. Below it the goroutine scheduling cost
-// outweighs the regex work, so Scan stays on the sequential path.
+// parallelScanMinBody is the body size (bytes) at or above which Scan
+// fans the rule set out across goroutines. Below it the goroutine
+// scheduling cost outweighs the regex work, so Scan stays on the
+// sequential path.
 const parallelScanMinBody = 4096
 
 // Finding is one detected secret.
@@ -47,44 +49,55 @@ type compiledRule struct {
 	prefixBytes []byte // prefix as []byte, for the Scan literal-prefix gate
 }
 
-// New compiles the vendored rule set into a Detector.
-func New(cfg Config) (*Detector, error) {
+// New builds a Detector. When called with no providers, it falls back
+// to DefaultProviders(). Providers are flattened in declaration order;
+// when two rules match the same byte span, the first one wins.
+func New(cfg Config, providers ...Provider) (*Detector, error) {
 	if cfg.EntropyThreshold == 0 {
 		cfg.EntropyThreshold = 4.0
 	}
 	if cfg.EntropyMinLen == 0 {
 		cfg.EntropyMinLen = 24
 	}
-	compiled := make([]compiledRule, 0, len(rules))
-	for _, r := range rules {
-		re, err := regexp.Compile(r.regex)
-		if err != nil {
-			return nil, fmt.Errorf("detect: rule %q: %w", r.name, err)
+	if len(providers) == 0 {
+		providers = DefaultProviders()
+	}
+
+	var total int
+	for _, p := range providers {
+		total += len(p.Rules())
+	}
+	compiled := make([]compiledRule, 0, total)
+	for _, p := range providers {
+		for _, r := range p.Rules() {
+			if r.Regex == nil {
+				return nil, fmt.Errorf("detect: provider %q: rule %q has nil regex", p.Name(), r.Name)
+			}
+			prefix, _ := r.Regex.LiteralPrefix()
+			compiled = append(compiled, compiledRule{
+				name:        r.Name,
+				severity:    r.Severity,
+				group:       r.Group,
+				re:          r.Regex,
+				prefix:      prefix,
+				prefixBytes: []byte(prefix),
+			})
 		}
-		prefix, _ := re.LiteralPrefix()
-		compiled = append(compiled, compiledRule{
-			name: r.name, severity: r.severity, group: r.group, re: re,
-			prefix: prefix, prefixBytes: []byte(prefix),
-		})
 	}
 	return &Detector{rules: compiled, cfg: cfg}, nil
 }
 
-// RuleCount returns the number of compiled detection rules.
+// RuleCount returns the number of compiled detection rules across all
+// providers.
 func (d *Detector) RuleCount() int { return len(d.rules) }
 
-// Scan returns every distinct secret found in body, sorted by value. Regex
-// rules always run; the entropy heuristic runs only when enabled in Config.
+// Scan returns every distinct secret found in body, sorted by value.
+// Regex rules always run; the entropy heuristic runs only when enabled
+// in Config.
 func (d *Detector) Scan(body []byte) []Finding {
 	seen := make(map[string]Finding, len(d.rules))
 
-	// applyRule runs one rule against body and returns its findings in match
-	// order. body is read-only; FindAllSubmatch does not mutate it, so this is
-	// safe to call concurrently.
 	applyRule := func(r compiledRule) []Finding {
-		// A rule whose regex starts with a literal prefix cannot match unless
-		// that prefix is present; bytes.Contains is far cheaper than a regex
-		// scan, so skip the scan when the prefix is absent.
 		if len(r.prefixBytes) > 0 && !bytes.Contains(body, r.prefixBytes) {
 			return nil
 		}
@@ -102,8 +115,6 @@ func (d *Detector) Scan(body []byte) []Finding {
 		return local
 	}
 
-	// merge folds a rule's findings into seen with first-rule-wins dedup; it
-	// must be called in rule (slice) order to keep attribution deterministic.
 	merge := func(findings []Finding) {
 		for _, f := range findings {
 			if _, ok := seen[f.Value]; !ok {
@@ -113,9 +124,6 @@ func (d *Detector) Scan(body []byte) []Finding {
 	}
 
 	if len(body) >= parallelScanMinBody {
-		// pool.NewWithResults preserves submission order in the returned slice,
-		// so iterating it merges rules in slice order — identical dedup to the
-		// sequential path.
 		p := pool.NewWithResults[[]Finding]()
 		for _, r := range d.rules {
 			p.Go(func() []Finding { return applyRule(r) })
@@ -144,9 +152,10 @@ func (d *Detector) Scan(body []byte) []Finding {
 	return out
 }
 
-// LiteralPrefixLen returns the byte length of the longest rule literal prefix
-// that value begins with — used to keep a credential's recognizable prefix
-// intact when garbling. Returns 0 when no rule prefix matches.
+// LiteralPrefixLen returns the byte length of the longest rule literal
+// prefix that value begins with — used to keep a credential's
+// recognizable prefix intact when garbling. Returns 0 when no rule
+// prefix matches.
 func (d *Detector) LiteralPrefixLen(value string) int {
 	best := 0
 	for _, r := range d.rules {
