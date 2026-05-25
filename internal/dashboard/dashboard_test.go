@@ -18,7 +18,7 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 		t.Fatalf("store.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if err := st.InitCrypto(t.Context(),"pass"); err != nil {
+	if err := st.InitCrypto(t.Context(), "pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
 	srv, err := NewServer(st, nil)
@@ -85,7 +85,7 @@ func TestDashboardTabsAndDebug(t *testing.T) {
 	srv, st := newTestServer(t)
 	const original = "sk-ant-atvk-buuzkw-kjufj-5830"
 	const masked = "sk-ant-wwcpympprjrtnfxw2529185"
-	secID, err := st.PutSecret(t.Context(),store.Secret{
+	secID, err := st.PutSecret(t.Context(), store.Secret{
 		Name: "ANTHROPIC_API_KEY", Source: "registered",
 		Original: original, Mask: masked, Shape: "shape",
 	})
@@ -94,7 +94,7 @@ func TestDashboardTabsAndDebug(t *testing.T) {
 	}
 
 	body := []byte(`{"messages":[{"content":"my key ` + masked + ` here"}]}`)
-	reqID, err := st.LogRequest(t.Context(),store.RequestRecord{
+	reqID, err := st.LogRequest(t.Context(), store.RequestRecord{
 		Provider: "anthropic", Host: "api.anthropic.com",
 		Method: "POST", Path: "/v1/messages", Status: 200, Masked: 1,
 		ReqBody: body, RespBody: body,

@@ -57,33 +57,26 @@ osm run -- codex
 
 ## What `osm init` does
 
-`osm init` is one-time setup:
+`osm init` is one-time setup and needs **no administrator access**:
 
 1. Creates the state directory `~/.opensecretmask/` (mode `0700`).
 2. Prompts for a passphrase and creates the encrypted SQLite store. The
    passphrase is never written to disk.
 3. Generates a local root CA — `ca-cert.pem` and `ca-key.pem` (mode `0600`).
-4. **Installs the CA into your system trust store.** This is the only step
-   that needs administrator access, because it writes to a root-owned
-   location:
-   - **macOS** — `sudo security add-trusted-cert -d -k /Library/Keychains/System.keychain ca-cert.pem` (the System keychain).
-   - **Linux** — copies the cert to `/usr/local/share/ca-certificates/` and runs `sudo update-ca-certificates`.
 
-   Without this, your tools reject the proxy's intercepted TLS connection
-   with a certificate error.
-
-Before step 4, `osm init` prints exactly what it will run and waits **5
-seconds** so you can cancel with Ctrl-C. To skip the trust install, run
-`osm init --no-trust` — the CA file is still written; trust it yourself
-later, or per-tool via `NODE_EXTRA_CA_CERTS` / `SSL_CERT_FILE`. Steps 1–3
-need no special privileges.
+osm does **not** install the CA into your system trust store. Trust is
+per-process: `osm run -- <cmd>` exports `NODE_EXTRA_CA_CERTS`,
+`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, and
+`HTTPS_PROXY` only for the child command, so nothing outside that one
+process is affected. This is the recommended way to use osm.
 
 ## How it works
 
-- **Interception** — `osm` is an HTTPS proxy with its own local CA. `osm init`
-  installs that CA so your tools trust the intercepted connection. Only
-  configured LLM hosts are intercepted; all other traffic is tunnelled
-  untouched.
+- **Interception** — `osm` is an HTTPS proxy with its own local CA.
+  `osm run` exports proxy and CA-trust env vars for one child command so
+  that command trusts the intercepted TLS; nothing else on the system
+  changes. Only configured LLM hosts are intercepted; all other traffic
+  is tunnelled untouched.
 - **Detection** — request bodies are scanned with 45 vendored credential
   patterns (from [pipelock](https://github.com/luckyPipewrench/pipelock),
   Apache-2.0) plus your registered secrets. An optional Shannon-entropy pass
@@ -102,7 +95,7 @@ need no special privileges.
 | command | purpose |
 | --- | --- |
 | `osm init` | create the state directory, CA, and encrypted store |
-| `osm uninstall` | remove the CA from the system trust store |
+| `osm uninstall` | _deprecated_ — osm installs nothing system-wide; use `rm -rf ~/.opensecretmask` or `osm uninstall --purge` |
 | `osm proxy` | run the masking proxy and dashboard |
 | `osm run -- command [args]` | run a command routed through the proxy |
 | `osm add NAME=VALUE` | register a secret to mask |

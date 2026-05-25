@@ -37,7 +37,7 @@ func newProxyHarness(t *testing.T, upstream http.Handler, paths ...string) *prox
 		t.Fatalf("store.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if err := st.InitCrypto(t.Context(),"test-pass"); err != nil {
+	if err := st.InitCrypto(t.Context(), "test-pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
 	det, err := detect.New(detect.Config{})
@@ -201,7 +201,7 @@ func TestProxyTunnelsNonLLMHostUntouched(t *testing.T) {
 		t.Fatalf("store.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if err := st.InitCrypto(t.Context(),"pass"); err != nil {
+	if err := st.InitCrypto(t.Context(), "pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
 	det, err := detect.New(detect.Config{})
