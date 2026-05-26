@@ -55,13 +55,17 @@ claude                    # auto-runs `osm run -- claude`
 
 Wrapped tools: `claude`, `codex`, `pi`. Suppress the per-invocation banner
 with `OSM_QUIET=1`. Remove with `osm shell uninstall`.
-It reuses a running `osm proxy` if one is up, otherwise starts its own
-proxy and dashboard on ephemeral ports for just that command and tears
-them down on exit. The per-process env vars make Node, Python, and curl
-trust the CA even without the system trust install:
+
+The first `osm run` on a host spawns a background `osm proxy` daemon and
+records its PID + address in `~/.opensecretmask/proxy.pid`. Subsequent
+invocations reuse that daemon; if it has died, the next `osm run`
+respawns. The daemon outlives the child — stop it with
+`kill $(jq -r .pid < ~/.opensecretmask/proxy.pid)`. The per-process env
+vars make Node, Python, and curl trust the CA without any system trust
+install:
 
 ```sh
-osm run -- claude          # spawns a proxy, routes claude through it
+osm run -- claude          # 1st: spawns daemon; rest: reuses it
 osm run -- codex
 ```
 
@@ -87,10 +91,12 @@ process is affected. This is the recommended way to use osm.
   that command trusts the intercepted TLS; nothing else on the system
   changes. Only configured LLM hosts are intercepted; all other traffic
   is tunnelled untouched.
-- **Detection** — request bodies are scanned with 45 vendored credential
-  patterns (from [pipelock](https://github.com/luckyPipewrench/pipelock),
-  Apache-2.0) plus your registered secrets. An optional Shannon-entropy pass
-  (`osm proxy --detect-entropy`) catches unknown high-entropy tokens.
+- **Detection** — request bodies are scanned by pluggable `Provider`s
+  (builtin patterns vendored from [pipelock](https://github.com/luckyPipewrench/pipelock)
+  Apache-2.0, plus llm/cloud/chat/git providers covering Perplexity,
+  Bedrock, Slack, GitLab variants and more) on top of your registered
+  secrets. An optional Shannon-entropy pass (`osm proxy --detect-entropy`)
+  catches unknown high-entropy tokens.
 - **Masking** — each secret is replaced by a random, same-shape fake. The
   same secret always maps to the same fake, so the model sees something
   stable and credential-shaped.
@@ -125,12 +131,10 @@ watsonx, Databricks, OCI) are not matched by default — add them explicitly.
 
 **Path scoping.** Each provider can restrict masking to specific request
 paths via `Provider.Paths` (regexp list). An empty list or `"*"` masks every
-path — the safe default. Anthropic and OpenAI currently scope to their
-completion endpoints (`/v1/messages`, `/v1/chat/completions`, etc.) because
-those are the only paths observed to carry secrets; their telemetry/event-log
-endpoints are forwarded unmasked. All other hosts mask every path. Out-of-scope
-requests are still intercepted and logged (dashboard shows `masked=0`) so you
-can spot unexpected secrets and switch a host back to `"*"` if needed.
+path — the default for every built-in provider, including Anthropic and
+OpenAI. Out-of-scope requests (when an explicit allowlist is configured) are
+still intercepted and logged (dashboard shows `masked=0`) so you can spot
+unexpected paths and adjust scoping if needed.
 
 ## Dashboard
 
