@@ -43,6 +43,13 @@ repos:
         pass_filenames: false
         files: '\.go$'
 
+      - id: go-fix
+        name: go fix
+        entry: bash -c 'go fix ./...'
+        language: system
+        pass_filenames: false
+        files: '\.go$'
+
       - id: gosec
         name: gosec
         entry: bash -c 'command -v gosec >/dev/null || go install github.com/securego/gosec/v2/cmd/gosec@latest; gosec -no-fail ./...'
