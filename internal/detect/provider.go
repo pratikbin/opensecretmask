@@ -19,5 +19,6 @@ func DefaultProviders() []Provider {
 		cloudProvider{},
 		chatProvider{},
 		gitProvider{},
+		devtoolsProvider{},
 	}
 }
