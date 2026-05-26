@@ -21,6 +21,7 @@ func thinkingValues(t *testing.T, body []byte) (sig, text string) {
 }
 
 func TestPreserveOpaqueBlocksRestoresSignature(t *testing.T) {
+	t.Parallel()
 	original := []byte(`{"model":"claude","messages":[` +
 		`{"role":"assistant","content":[` +
 		`{"type":"thinking","thinking":"key is sk-ant-REALSECRET99","signature":"AbCdEf0123456789SIGNATURE+/=="}]}]}`)
@@ -42,6 +43,7 @@ func TestPreserveOpaqueBlocksRestoresSignature(t *testing.T) {
 }
 
 func TestPreserveOpaqueBlocksRestoresRedactedData(t *testing.T) {
+	t.Parallel()
 	original := []byte(`{"messages":[{"role":"assistant","content":[` +
 		`{"type":"redacted_thinking","data":"ENCRYPTED-BLOB-original=="}]}]}`)
 	masked := []byte(`{"messages":[{"role":"assistant","content":[` +
@@ -60,6 +62,7 @@ func TestPreserveOpaqueBlocksRestoresRedactedData(t *testing.T) {
 }
 
 func TestPreserveOpaqueBlocksNoThinkingBlocks(t *testing.T) {
+	t.Parallel()
 	masked := []byte(`{"messages":[{"role":"user","content":"hello"}]}`)
 	if out := preserveOpaqueBlocks(masked, masked); string(out) != string(masked) {
 		t.Errorf("body with no thinking blocks must pass through unchanged")
@@ -67,6 +70,7 @@ func TestPreserveOpaqueBlocksNoThinkingBlocks(t *testing.T) {
 }
 
 func TestPreserveOpaqueBlocksNonJSON(t *testing.T) {
+	t.Parallel()
 	masked := []byte("not json at all")
 	if out := preserveOpaqueBlocks(masked, masked); string(out) != string(masked) {
 		t.Errorf("non-JSON body must pass through unchanged")
@@ -74,6 +78,7 @@ func TestPreserveOpaqueBlocksNonJSON(t *testing.T) {
 }
 
 func TestPreserveOpaqueBlocksPreservesUnknownFields(t *testing.T) {
+	t.Parallel()
 	original := []byte(`{"messages":[{"role":"assistant","content":[` +
 		`{"type":"thinking","thinking":"t","signature":"SIG"}]}],` +
 		`"future_field":{"nested":[1,2,3]},"max_tokens":64000}`)

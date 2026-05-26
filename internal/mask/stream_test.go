@@ -7,6 +7,7 @@ import (
 )
 
 func TestStreamUnmaskerSplitAcrossChunks(t *testing.T) {
+	t.Parallel()
 	u := NewStreamUnmasker([]store.Secret{
 		{Original: "REALSECRETVALUE", Mask: "fakemaskedDATA0"},
 	})
@@ -26,6 +27,7 @@ func TestStreamUnmaskerSplitAcrossChunks(t *testing.T) {
 }
 
 func TestStreamUnmaskerSingleChunk(t *testing.T) {
+	t.Parallel()
 	u := NewStreamUnmasker([]store.Secret{
 		{Original: "ORIGINALVALUE", Mask: "maskedVALUE00"},
 	})
@@ -36,6 +38,7 @@ func TestStreamUnmaskerSingleChunk(t *testing.T) {
 }
 
 func TestStreamUnmaskerPassthrough(t *testing.T) {
+	t.Parallel()
 	u := NewStreamUnmasker(nil)
 	got := append(u.Process([]byte("hello ")), u.Process([]byte("world"))...)
 	got = append(got, u.Flush()...)

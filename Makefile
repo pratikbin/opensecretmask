@@ -9,13 +9,13 @@ build:
 	go build -trimpath -ldflags="-s -w" -o ~/tools/$(BIN) ./cmd/osm
 
 test:
-	go test -race ./...
+	go test -race -count=1 ./...
 
 # test-integration runs the testcontainers-driven integration suite. Builds
 # the integration image inline from tests/integration/Dockerfile — no manual
 # cross-compile needed.
 test-integration:
-	go test -tags integration -count=1 -timeout=15m ./tests/integration/...
+	go test -tags integration -race -count=1 -timeout=15m ./tests/integration/...
 
 # e2e-bins cross-compiles the linux/amd64 binaries baked into the e2e image.
 e2e-bins:
@@ -35,7 +35,7 @@ e2e-image: e2e-bins
 # Requires Docker and ANTHROPIC_AUTH_TOKEN to exercise the claude-code paths;
 # the mockupstream-driven TestE2E_Run_MaskRoundTrip needs Docker only.
 test-e2e: e2e-image
-	go test -tags e2e -count=1 -timeout=30m ./tests/e2e/...
+	go test -tags e2e -race -count=1 -timeout=30m ./tests/e2e/...
 
 lint:
 	golangci-lint run ./...

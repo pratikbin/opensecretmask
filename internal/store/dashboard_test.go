@@ -1,8 +1,10 @@
-package store
+package store_test
 
 import (
 	"testing"
 	"time"
+
+	"github.com/pratikbin/opensecretmask/internal/store"
 )
 
 func TestStatsAndListRequests(t *testing.T) {
@@ -11,26 +13,26 @@ func TestStatsAndListRequests(t *testing.T) {
 		t.Fatalf("InitCrypto: %v", err)
 	}
 
-	if _, err := s.PutSecret(t.Context(), Secret{
+	if _, err := s.PutSecret(t.Context(), store.Secret{
 		Name: "K1", Source: "registered",
 		Original: "registered-secret-value", Mask: "m1", Shape: "x",
 	}); err != nil {
 		t.Fatalf("PutSecret registered: %v", err)
 	}
-	if _, err := s.PutSecret(t.Context(), Secret{
+	if _, err := s.PutSecret(t.Context(), store.Secret{
 		Name: "K2", Source: "detected",
 		Original: "detected-secret-value", Mask: "m2", Shape: "y",
 	}); err != nil {
 		t.Fatalf("PutSecret detected: %v", err)
 	}
 
-	if _, err := s.LogRequest(t.Context(), RequestRecord{
+	if _, err := s.LogRequest(t.Context(), store.RequestRecord{
 		Provider: "anthropic", Host: "api.anthropic.com",
 		Method: "POST", Path: "/v1/messages", Status: 200, Masked: 2,
 	}, nil); err != nil {
 		t.Fatalf("LogRequest 1: %v", err)
 	}
-	if _, err := s.LogRequest(t.Context(), RequestRecord{
+	if _, err := s.LogRequest(t.Context(), store.RequestRecord{
 		Provider: "openai", Host: "api.openai.com",
 		Method: "POST", Path: "/v1/chat/completions", Status: 200, Masked: 0,
 	}, nil); err != nil {
@@ -69,7 +71,7 @@ func TestStatsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stats on empty store: %v", err)
 	}
-	if st != (Stats{}) {
+	if st != (store.Stats{}) {
 		t.Fatalf("empty store should give zero stats, got %+v", st)
 	}
 }
@@ -79,7 +81,7 @@ func TestGetRequestAndPurge(t *testing.T) {
 	if err := s.InitCrypto(t.Context(), "pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
-	secID, err := s.PutSecret(t.Context(), Secret{
+	secID, err := s.PutSecret(t.Context(), store.Secret{
 		Name: "K", Source: "registered",
 		Original: "real-secret-value", Mask: "MASKED01", Shape: "x",
 	})
@@ -88,7 +90,7 @@ func TestGetRequestAndPurge(t *testing.T) {
 	}
 
 	body := []byte(`{"k":"MASKED01"}`)
-	reqID, err := s.LogRequest(t.Context(), RequestRecord{
+	reqID, err := s.LogRequest(t.Context(), store.RequestRecord{
 		Provider: "anthropic", Host: "api.anthropic.com",
 		Method: "POST", Path: "/v1/messages", Status: 200, Masked: 1,
 		ReqBody: body, RespBody: body,

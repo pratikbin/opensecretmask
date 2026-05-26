@@ -27,7 +27,11 @@ import (
 // The image is built from tests/integration/Dockerfile with the repo root as
 // build context, so the multi-stage builder compiles osm and mockupstream
 // from current source — no manual cross-compile step needed.
-func newIntegrationContainer(t *testing.T, ctx context.Context) testcontainers.Container {
+//
+// Returns the container and the per-test OPENSECRETMASK_HOME path inside the
+// container. Using a unique path per test prevents daemon/pidfile bleed when
+// multiple tests run against the same container image layer cache.
+func newIntegrationContainer(t *testing.T, ctx context.Context) (testcontainers.Container, string) {
 	t.Helper()
 	req := testcontainers.ContainerRequest{
 		FromDockerfile: testcontainers.FromDockerfile{
@@ -46,9 +50,11 @@ func newIntegrationContainer(t *testing.T, ctx context.Context) testcontainers.C
 	require.NoError(t, err, "start integration container")
 	t.Cleanup(func() { _ = c.Terminate(context.Background()) })
 
-	r := runIn(t, ctx, c, "osm", "init")
+	homeDir := fmt.Sprintf("/tmp/osm-%d", time.Now().UnixNano())
+	osmEnv := []string{"OPENSECRETMASK_HOME=" + homeDir}
+	r := runIn(t, ctx, c, osmEnv, "osm", "init")
 	require.Equal(t, 0, r.exitCode, "osm init failed: stdout=%s stderr=%s", r.stdout, r.stderr)
-	return c
+	return c, homeDir
 }
 
 type runExecResult struct {
@@ -57,35 +63,49 @@ type runExecResult struct {
 	stderr   string
 }
 
-// runIn runs cmd inside c. tcexec.Multiplexed() asks testcontainers to
-// demultiplex the docker exec stream so the returned reader is plain text
-// (combined stdout+stderr) instead of stdcopy-framed bytes — without it,
-// the 8-byte frame headers bleed into parseable output and break naive
-// line-based parsing.
-func runIn(t *testing.T, ctx context.Context, c testcontainers.Container, cmd ...string) runExecResult {
+// runIn runs cmd inside c with the given exec-level environment variables.
+// tcexec.Multiplexed() asks testcontainers to demultiplex the docker exec
+// stream so the returned reader is plain text (combined stdout+stderr) instead
+// of stdcopy-framed bytes — without it, the 8-byte frame headers bleed into
+// parseable output and break naive line-based parsing.
+// Pass nil for env when no extra variables are needed.
+func runIn(t *testing.T, ctx context.Context, c testcontainers.Container, env []string, cmd ...string) runExecResult {
 	t.Helper()
-	code, reader, err := c.Exec(ctx, cmd, tcexec.Multiplexed())
+	opts := []tcexec.ProcessOption{tcexec.Multiplexed()}
+	if len(env) > 0 {
+		opts = append(opts, tcexec.WithEnv(env))
+	}
+	code, reader, err := c.Exec(ctx, cmd, opts...)
 	require.NoError(t, err)
 	buf := &bytes.Buffer{}
 	_, _ = io.Copy(buf, reader)
 	return runExecResult{exitCode: code, stdout: buf.String()}
 }
 
-// shellIn runs a bash -lc one-liner inside c.
-func shellIn(t *testing.T, ctx context.Context, c testcontainers.Container, script string) runExecResult {
+// shellIn runs a bash -lc one-liner inside c with the given environment.
+// env vars are also exported at the head of the script so child processes
+// spawned by nohup or osm run inherit OPENSECRETMASK_HOME.
+// Pass nil for env when no extra variables are needed.
+func shellIn(t *testing.T, ctx context.Context, c testcontainers.Container, env []string, script string) runExecResult {
 	t.Helper()
-	return runIn(t, ctx, c, "bash", "-lc", script)
+	// Export env vars at the head of the script so nohup'd children inherit them.
+	var exports string
+	for _, kv := range env {
+		exports += "export " + kv + "; "
+	}
+	return runIn(t, ctx, c, env, "bash", "-lc", exports+script)
 }
 
 func TestIntegrationRun_EnvInjection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	c := newIntegrationContainer(t, ctx)
+	c, homeDir := newIntegrationContainer(t, ctx)
+	osmEnv := []string{"OPENSECRETMASK_HOME=" + homeDir}
 
 	// --listen 127.0.0.1:1 forces the spawn-own-proxy path: port 1 is
 	// reliably refused, so the daemon-probe miss is deterministic and the
 	// test cannot silently flip into the reuse path.
-	r := shellIn(t, ctx, c,
+	r := shellIn(t, ctx, c, osmEnv,
 		`osm run --listen 127.0.0.1:1 -- sh -c 'env > /tmp/env.out' && cat /tmp/env.out`)
 	require.Equal(t, 0, r.exitCode, "osm run failed: %s", r.stdout)
 
@@ -101,12 +121,13 @@ func TestIntegrationRun_EnvInjection(t *testing.T) {
 	}
 
 	caPath := envMap["NODE_EXTRA_CA_CERTS"]
-	require.Equal(t, "/root/.opensecretmask/ca-cert.pem", caPath, "unexpected CA path")
+	wantCAPath := homeDir + "/ca-cert.pem"
+	require.Equal(t, wantCAPath, caPath, "unexpected CA path")
 	for _, k := range []string{"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"} {
 		require.Equalf(t, caPath, envMap[k], "%s should equal NODE_EXTRA_CA_CERTS", k)
 	}
 
-	statR := shellIn(t, ctx, c, "test -f "+caPath+" && echo OK")
+	statR := shellIn(t, ctx, c, osmEnv, "test -f "+caPath+" && echo OK")
 	require.Equal(t, 0, statR.exitCode, "CA cert file not present at %s: %s", caPath, statR.stdout)
 	require.Contains(t, statR.stdout, "OK")
 
@@ -123,20 +144,21 @@ var maskLineRE = regexp.MustCompile(`mask sent to LLMs:\s*(\S+)`)
 func TestIntegrationRun_MaskRoundTrip(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	c := newIntegrationContainer(t, ctx)
+	c, homeDir := newIntegrationContainer(t, ctx)
+	osmEnv := []string{"OPENSECRETMASK_HOME=" + homeDir}
 
-	const secret = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-	addR := shellIn(t, ctx, c, fmt.Sprintf("osm add 'SECRET=%s'", secret))
+	const secret = "sk-ant-qbs16-CRLJGILDKSVFDPHUTXCRNCTEZYAKFGQMVAFSHLBKIWNTQXTWUUZELGOLASIIDUAFUGHOLJDAGJHJMAREUYCZFVVG"
+	addR := shellIn(t, ctx, c, osmEnv, fmt.Sprintf("osm add 'SECRET=%s'", secret))
 	require.Equal(t, 0, addR.exitCode, "osm add failed: %s", addR.stdout)
 	m := maskLineRE.FindStringSubmatch(addR.stdout)
 	require.NotNilf(t, m, "could not parse mask from osm add stdout:\n%s", addR.stdout)
 	mask := m[1]
 	require.NotEqual(t, secret, mask, "mask must differ from real secret")
 
-	mockR := shellIn(t, ctx, c,
-		`nohup mockupstream --ca-dir /root/.opensecretmask >/tmp/mock.out 2>/tmp/mock.err &
+	mockR := shellIn(t, ctx, c, osmEnv,
+		fmt.Sprintf(`nohup mockupstream --ca-dir %s >/tmp/mock.out 2>/tmp/mock.err &
 		 for i in $(seq 1 50); do grep -q "listen=" /tmp/mock.out 2>/dev/null && break; sleep 0.1; done
-		 cat /tmp/mock.out`)
+		 cat /tmp/mock.out`, homeDir))
 	require.Equal(t, 0, mockR.exitCode, "mockupstream launch failed: stdout=%s", mockR.stdout)
 	mockListenRE := regexp.MustCompile(`listen=([0-9.]+:[0-9]+)`)
 	mm := mockListenRE.FindStringSubmatch(mockR.stdout)
@@ -149,10 +171,10 @@ func TestIntegrationRun_MaskRoundTrip(t *testing.T) {
 		`osm run --listen 127.0.0.1:1 --provider 127.0.0.1=anthropic -- `+
 			`curl -s --max-time 10 https://%s/v1/messages -d %q`,
 		mockHost, body)
-	curlR := shellIn(t, ctx, c, curlScript)
+	curlR := shellIn(t, ctx, c, osmEnv, curlScript)
 	require.Equal(t, 0, curlR.exitCode, "osm run + curl failed: stdout=%s stderr=%s", curlR.stdout, curlR.stderr)
 
-	lastR := shellIn(t, ctx, c, fmt.Sprintf("curl -s --max-time 5 -k https://%s/__last_body", mockHost))
+	lastR := shellIn(t, ctx, c, nil, fmt.Sprintf("curl -s --max-time 5 -k https://%s/__last_body", mockHost))
 	require.Equal(t, 0, lastR.exitCode, "fetch /__last_body failed: %s", lastR.stdout)
 	upstreamBody := lastR.stdout
 	require.NotContainsf(t, upstreamBody, secret,
