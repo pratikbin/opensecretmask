@@ -116,14 +116,7 @@ func TestCLIRunRequiresInit(t *testing.T) {
 	}
 }
 
-func TestCLIRunSpawnsOwnProxy(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("OPENSECRETMASK_HOME", home)
-	t.Setenv("OSM_KEY", "pass")
-	mustRunOSM(t, "init")
-	// Port 1 is reliably refused — with no proxy to reuse, 'osm run' must
-	// spawn its own ephemeral proxy and still run the command to completion.
-	if err := runOSM(t, "run", "--listen", "127.0.0.1:1", "echo", "hi"); err != nil {
-		t.Fatalf("'osm run' should spawn its own proxy and succeed: %v", err)
-	}
-}
+// Daemon spawn-detach coverage lives in tests/integration where the real
+// osm binary runs inside a container. Unit tests run in-process so
+// os.Executable resolves to the test binary, not the CLI, and the spawned
+// child cannot run the proxy subcommand.
