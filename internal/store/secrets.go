@@ -112,7 +112,7 @@ func (s *Store) ListSecrets(ctx context.Context) ([]SecretMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []SecretMeta
 	for rows.Next() {
 		var m SecretMeta
@@ -164,7 +164,7 @@ func (s *Store) RegisteredSecrets(ctx context.Context) ([]Secret, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Secret
 	for rows.Next() {
 		var sec Secret

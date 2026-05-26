@@ -42,9 +42,9 @@ func statusCmd() *cobra.Command {
 			}
 			fmt.Println()
 			tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tSOURCE\tMASK\tHITS")
+			_, _ = fmt.Fprintln(tw, "NAME\tSOURCE\tMASK\tHITS")
 			for _, s := range secrets {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%d\n", s.Name, s.Source, s.Mask, s.Hits)
+				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%d\n", s.Name, s.Source, s.Mask, s.Hits)
 			}
 			return tw.Flush()
 		},

@@ -14,10 +14,7 @@ func TestStreamUnmaskerSplitAcrossChunks(t *testing.T) {
 
 	var got []byte
 	for i := 0; i < len(full); i += 4 { // 4-byte chunks split the mask
-		end := i + 4
-		if end > len(full) {
-			end = len(full)
-		}
+		end := min(i+4, len(full))
 		got = append(got, u.Process([]byte(full[i:end]))...)
 	}
 	got = append(got, u.Flush()...)
