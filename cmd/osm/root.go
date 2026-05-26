@@ -17,9 +17,11 @@ func rootCmd() *cobra.Command {
 		uninstallCmd(),
 		proxyCmd(),
 		runCmd(),
+		restartCmd(),
 		addCmd(),
 		preloadCmd(),
 		statusCmd(),
+		dashboardCmd(),
 		doctorCmd(),
 		shellCmd(),
 	)

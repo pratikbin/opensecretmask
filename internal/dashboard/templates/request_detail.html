@@ -15,7 +15,7 @@
       <span class="font-mono text-sm truncate">{{.R.Method}} {{.R.Path}}</span>
       {{template "status" .R.Status}}
     </div>
-    <div class="flex-1 min-h-0 overflow-auto p-4 flex flex-col gap-4">
+    <div id="detail-body" class="flex-1 min-h-0 overflow-auto p-4 flex flex-col gap-4">
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-sm">
         <div>
           <div class="opacity-50 text-xs uppercase">Provider</div>

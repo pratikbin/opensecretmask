@@ -56,13 +56,12 @@ func (r hostRule) maskPath(path string) bool {
 // hostnames (Azure OpenAI, AWS Bedrock, watsonx, Databricks, OCI) are not
 // listed; intercept those with `--provider <host>`.
 //
-// Anthropic and OpenAI scope masking to their completion endpoints (the only
-// paths observed to carry secrets); every other host masks all paths until
-// its scope is known.
+// All hosts mask every path; out-of-scope paths are forwarded unmasked only
+// when an explicit `Paths` allowlist is configured per provider.
 var DefaultProviders = []Provider{
 	// Proprietary / frontier
-	{Host: "api.anthropic.com", Dialect: "anthropic", Paths: []string{`^/v1/messages`, `^/v1/complete`}},
-	{Host: "api.openai.com", Dialect: "openai", Paths: []string{`^/v1/chat/completions`, `^/v1/responses`, `^/v1/completions`}},
+	{Host: "api.anthropic.com", Dialect: "anthropic"},
+	{Host: "api.openai.com", Dialect: "openai"},
 	{Host: "generativelanguage.googleapis.com", Dialect: "gemini"},
 	{Host: "aiplatform.googleapis.com", Dialect: "vertex"},
 	{Host: "api.x.ai", Dialect: "xai"},

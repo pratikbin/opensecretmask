@@ -71,24 +71,54 @@ func proxyCmd() *cobra.Command {
 				providers = append(providers, proxy.Provider{Host: host, Dialect: dialect})
 			}
 
-			dashSrv, err := dashboard.NewServer(st, logger)
+			// Bind both listeners up front so the actual addresses can be
+			// recorded in the pidfile — 'osm run' reads that file to discover
+			// where to send traffic. Supports :0 ephemeral ports.
+			pxyLn, err := net.Listen("tcp", listen)
 			if err != nil {
-				return err
+				return fmt.Errorf("proxy listen on %s: %w", listen, err)
 			}
 			dashLn, err := net.Listen("tcp", dash)
 			if err != nil {
+				_ = pxyLn.Close()
 				return fmt.Errorf("dashboard listen on %s: %w", dash, err)
 			}
+			proxyAddr := pxyLn.Addr().String()
+			dashAddr := dashLn.Addr().String()
 
+			dashSrv, err := dashboard.NewServer(st, logger)
+			if err != nil {
+				_ = pxyLn.Close()
+				_ = dashLn.Close()
+				return err
+			}
 			pxy := proxy.NewServer(proxy.Config{
-				Listen:    listen,
 				Providers: providers,
 				CA:        ca,
 				Masker:    m,
 				Store:     st,
 				Logger:    logger,
 			})
-			logger.Info("proxy listening", "addr", listen, "dashboard", "http://"+dash)
+
+			// Pidfile is the single source of truth that 'osm run' polls for
+			// daemon discovery. Written after listeners bind, removed on
+			// shutdown so a clean exit leaves no stale record.
+			if err := writePidFile(home, pidInfo{
+				PID:       os.Getpid(),
+				ProxyAddr: proxyAddr,
+				DashAddr:  dashAddr,
+				StartedAt: time.Now(),
+				Extra:     extra,
+				Entropy:   entropy,
+				LogLevel:  logLevel,
+			}); err != nil {
+				_ = pxyLn.Close()
+				_ = dashLn.Close()
+				return fmt.Errorf("write pidfile: %w", err)
+			}
+			defer func() { _ = removePidFile(home) }()
+
+			logger.Info("proxy listening", "addr", proxyAddr, "dashboard", "http://"+dashAddr)
 			for _, p := range providers {
 				paths := "all"
 				if len(p.Paths) > 0 {
@@ -104,7 +134,7 @@ func proxyCmd() *cobra.Command {
 
 			g, gctx := errgroup.WithContext(ctx)
 			g.Go(func() error {
-				if err := pxy.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				if err := pxy.Serve(pxyLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
 					return err
 				}
 				return nil
