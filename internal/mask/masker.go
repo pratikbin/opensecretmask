@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/pratikbin/opensecretmask/internal/detect"
@@ -130,10 +131,22 @@ func (m *Masker) maskBytes(ctx context.Context, body []byte, reg []regSecret) ([
 
 // maskJSONValue recursively masks every string leaf in v, recording the
 // secrets used by ID. Maps and slices are rewritten in place.
+//
+// Binary content blobs (images, PDFs, audio) are skipped structurally so the
+// detector never sees raw base64 — which otherwise yields hundreds of false
+// positives per attachment. Covered shapes:
+//   - Anthropic image/document: {"type":"base64","media_type":"...","data":"<b64>"}
+//   - Gemini inlineData / inline_data: {"mimeType":"...","data":"<b64>"}
+//   - OpenAI image_url / input_image / input_file: any string value starting
+//     with the "data:" URI scheme.
 func (m *Masker) maskJSONValue(ctx context.Context, v any, used map[int64]store.Secret, reg []regSecret) (any, error) {
 	switch t := v.(type) {
 	case map[string]any:
+		skipDataKey := isBinaryBlobMap(t)
 		for k, child := range t {
+			if skipDataKey && k == "data" {
+				continue
+			}
 			nv, err := m.maskJSONValue(ctx, child, used, reg)
 			if err != nil {
 				return nil, err
@@ -154,6 +167,9 @@ func (m *Masker) maskJSONValue(ctx context.Context, v any, used map[int64]store.
 		if t == "" {
 			return t, nil
 		}
+		if strings.HasPrefix(t, "data:") {
+			return t, nil
+		}
 		masked, secs, err := m.maskBytes(ctx, []byte(t), reg)
 		if err != nil {
 			return nil, err
@@ -168,6 +184,26 @@ func (m *Masker) maskJSONValue(ctx context.Context, v any, used map[int64]store.
 	default:
 		return v, nil
 	}
+}
+
+// isBinaryBlobMap reports whether m looks like a base64 attachment container
+// whose "data" key holds opaque bytes (not user text). It matches when m has
+// a "data" entry alongside either an explicit type=="base64" marker
+// (Anthropic) or a mime-type sibling (Gemini inlineData and snake_case
+// inline_data).
+func isBinaryBlobMap(m map[string]any) bool {
+	if _, hasData := m["data"]; !hasData {
+		return false
+	}
+	if typ, ok := m["type"].(string); ok && typ == "base64" {
+		return true
+	}
+	for _, k := range []string{"mimeType", "mime_type", "media_type"} {
+		if _, ok := m[k]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // UnmaskBody reverses MaskBody for a complete (non-streaming) response: every

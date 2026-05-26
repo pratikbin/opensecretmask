@@ -16,7 +16,7 @@ func newMasker(t *testing.T) (*Masker, *store.Store) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { _ = st.Close() })
 	if err := st.InitCrypto(t.Context(), "test-pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
@@ -210,5 +210,271 @@ func TestMaskerRegister(t *testing.T) {
 	}
 	if len(reg) != 1 || reg[0].Original != "hunter2-very-secret-value" {
 		t.Fatalf("registered secret not stored correctly: %+v", reg)
+	}
+}
+
+// Each base64 payload below embeds a credential-shaped substring (ghp_… or
+// sk-ant-…) that the detector WOULD flag if the binary-blob skip failed —
+// so a passing test proves the skip, not that the data simply happens not to
+// match any rule.
+
+func TestMaskBodyJSONSkipsAnthropicImageBlob(t *testing.T) {
+	m, _ := newMasker(t)
+	imageData := "iVBORw0KGgoAAAANSUhEUghp_abcdefghijklmnopqrstuvwxyz0123456789AAAA"
+	body, err := json.Marshal(map[string]any{
+		"messages": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{
+						"type": "image",
+						"source": map[string]any{
+							"type":       "base64",
+							"media_type": "image/png",
+							"data":       imageData,
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	masked, used, err := m.MaskBody(t.Context(), body)
+	if err != nil {
+		t.Fatalf("MaskBody: %v", err)
+	}
+	if len(used) != 0 {
+		t.Fatalf("expected no secrets in image blob, got %d: %+v", len(used), used)
+	}
+	if !bytes.Contains(masked, []byte(imageData)) {
+		t.Fatalf("image data was altered: %s", masked)
+	}
+}
+
+func TestMaskBodyJSONSkipsAnthropicDocumentBlob(t *testing.T) {
+	m, _ := newMasker(t)
+	pdfData := "JVBERi0xLjcKghp_abcdefghijklmnopqrstuvwxyz0123456789aaaaaa"
+	body, err := json.Marshal(map[string]any{
+		"messages": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{
+						"type": "document",
+						"source": map[string]any{
+							"type":       "base64",
+							"media_type": "application/pdf",
+							"data":       pdfData,
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	masked, used, err := m.MaskBody(t.Context(), body)
+	if err != nil {
+		t.Fatalf("MaskBody: %v", err)
+	}
+	if len(used) != 0 {
+		t.Fatalf("expected no secrets in PDF blob, got %d: %+v", len(used), used)
+	}
+	if !bytes.Contains(masked, []byte(pdfData)) {
+		t.Fatalf("PDF data was altered: %s", masked)
+	}
+}
+
+func TestMaskBodyJSONSkipsOpenAIChatImageURL(t *testing.T) {
+	m, _ := newMasker(t)
+	dataURI := "data:image/png;base64,iVBORw0KGghp_abcdefghijklmnopqrstuvwxyz0123456789AAAA"
+	body, err := json.Marshal(map[string]any{
+		"messages": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{
+						"type":      "image_url",
+						"image_url": map[string]any{"url": dataURI},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	masked, used, err := m.MaskBody(t.Context(), body)
+	if err != nil {
+		t.Fatalf("MaskBody: %v", err)
+	}
+	if len(used) != 0 {
+		t.Fatalf("expected no secrets in image_url, got %d: %+v", len(used), used)
+	}
+	if !bytes.Contains(masked, []byte(dataURI)) {
+		t.Fatalf("data URI was altered: %s", masked)
+	}
+}
+
+func TestMaskBodyJSONSkipsOpenAIResponsesInputImage(t *testing.T) {
+	m, _ := newMasker(t)
+	dataURI := "data:image/jpeg;base64,/9j/4ghp_abcdefghijklmnopqrstuvwxyz0123456789AA"
+	body, err := json.Marshal(map[string]any{
+		"input": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "input_image", "image_url": dataURI},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	masked, used, err := m.MaskBody(t.Context(), body)
+	if err != nil {
+		t.Fatalf("MaskBody: %v", err)
+	}
+	if len(used) != 0 {
+		t.Fatalf("expected no secrets in input_image, got %d: %+v", len(used), used)
+	}
+	if !bytes.Contains(masked, []byte(dataURI)) {
+		t.Fatalf("data URI was altered: %s", masked)
+	}
+}
+
+func TestMaskBodyJSONSkipsOpenAIInputFile(t *testing.T) {
+	m, _ := newMasker(t)
+	dataURI := "data:application/pdf;base64,JVBERi0xLjcKghp_abcdefghijklmnopqrstuvwxyz0123456789"
+	body, err := json.Marshal(map[string]any{
+		"input": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "input_file", "file_data": dataURI},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	masked, used, err := m.MaskBody(t.Context(), body)
+	if err != nil {
+		t.Fatalf("MaskBody: %v", err)
+	}
+	if len(used) != 0 {
+		t.Fatalf("expected no secrets in input_file, got %d: %+v", len(used), used)
+	}
+	if !bytes.Contains(masked, []byte(dataURI)) {
+		t.Fatalf("data URI was altered: %s", masked)
+	}
+}
+
+func TestMaskBodyJSONSkipsGeminiInlineData(t *testing.T) {
+	m, _ := newMasker(t)
+	imageData := "iVBORghp_abcdefghijklmnopqrstuvwxyz0123456789AAAAAA"
+	body, err := json.Marshal(map[string]any{
+		"contents": []any{
+			map[string]any{
+				"parts": []any{
+					map[string]any{
+						"inlineData": map[string]any{
+							"mimeType": "image/png",
+							"data":     imageData,
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	masked, used, err := m.MaskBody(t.Context(), body)
+	if err != nil {
+		t.Fatalf("MaskBody: %v", err)
+	}
+	if len(used) != 0 {
+		t.Fatalf("expected no secrets in inlineData, got %d: %+v", len(used), used)
+	}
+	if !bytes.Contains(masked, []byte(imageData)) {
+		t.Fatalf("inline data was altered: %s", masked)
+	}
+}
+
+func TestMaskBodyJSONSkipsGeminiInlineDataSnakeCase(t *testing.T) {
+	m, _ := newMasker(t)
+	imageData := "iVBORghp_abcdefghijklmnopqrstuvwxyz0123456789BBBBBB"
+	body, err := json.Marshal(map[string]any{
+		"contents": []any{
+			map[string]any{
+				"parts": []any{
+					map[string]any{
+						"inline_data": map[string]any{
+							"mime_type": "image/png",
+							"data":      imageData,
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	masked, used, err := m.MaskBody(t.Context(), body)
+	if err != nil {
+		t.Fatalf("MaskBody: %v", err)
+	}
+	if len(used) != 0 {
+		t.Fatalf("expected no secrets in inline_data, got %d: %+v", len(used), used)
+	}
+	if !bytes.Contains(masked, []byte(imageData)) {
+		t.Fatalf("inline data was altered: %s", masked)
+	}
+}
+
+func TestMaskBodyJSONImageBlobAdjacentSecretStillMasked(t *testing.T) {
+	m, _ := newMasker(t)
+	secret := "sk-ant-api03-abcdef1234567890ABCDEFGH"
+	imageData := "iVBORghp_abcdefghijklmnopqrstuvwxyz0123456789AAAA"
+	body, err := json.Marshal(map[string]any{
+		"messages": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{
+						"type": "image",
+						"source": map[string]any{
+							"type":       "base64",
+							"media_type": "image/png",
+							"data":       imageData,
+						},
+					},
+					map[string]any{"type": "text", "text": "key=" + secret},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	masked, used, err := m.MaskBody(t.Context(), body)
+	if err != nil {
+		t.Fatalf("MaskBody: %v", err)
+	}
+	if bytes.Contains(masked, []byte(secret)) {
+		t.Fatal("adjacent secret was not masked")
+	}
+	if !bytes.Contains(masked, []byte(imageData)) {
+		t.Fatal("image data was altered while masking adjacent text")
+	}
+	if len(used) != 1 {
+		t.Fatalf("expected exactly 1 secret used, got %d: %+v", len(used), used)
 	}
 }
