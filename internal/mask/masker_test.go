@@ -439,6 +439,132 @@ func TestMaskBodyJSONSkipsGeminiInlineDataSnakeCase(t *testing.T) {
 	}
 }
 
+func TestMaskBodyJSONSkipsAnthropicImageURLSource(t *testing.T) {
+	// {type:"image", source:{type:"url", url:"..."}} — whole source skipped.
+	m, _ := newMasker(t)
+	sourceURL := "https://example.com/ghp_abcdefghijklmnopqrstuvwxyz0123456789AAAA.png"
+	body, err := json.Marshal(map[string]any{
+		"messages": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{
+						"type":   "image",
+						"source": map[string]any{"type": "url", "url": sourceURL},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	masked, used, err := m.MaskBody(t.Context(), body)
+	if err != nil {
+		t.Fatalf("MaskBody: %v", err)
+	}
+	if len(used) != 0 {
+		t.Fatalf("expected no secrets in url source, got %d: %+v", len(used), used)
+	}
+	if !bytes.Contains(masked, []byte(sourceURL)) {
+		t.Fatalf("url source was altered: %s", masked)
+	}
+}
+
+func TestMaskBodyJSONSkipsAnthropicDocumentFileSource(t *testing.T) {
+	// {type:"document", source:{type:"file", file_id:"..."}} — source skipped.
+	m, _ := newMasker(t)
+	fileID := "file_ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+	body, err := json.Marshal(map[string]any{
+		"messages": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{
+						"type":   "document",
+						"source": map[string]any{"type": "file", "file_id": fileID},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	masked, used, err := m.MaskBody(t.Context(), body)
+	if err != nil {
+		t.Fatalf("MaskBody: %v", err)
+	}
+	if len(used) != 0 {
+		t.Fatalf("expected no secrets in file source, got %d: %+v", len(used), used)
+	}
+	if !bytes.Contains(masked, []byte(fileID)) {
+		t.Fatalf("file_id was altered: %s", masked)
+	}
+}
+
+func TestMaskBodyJSONSkipsOpenAIInputImageFileID(t *testing.T) {
+	m, _ := newMasker(t)
+	fileID := "file_ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+	body, err := json.Marshal(map[string]any{
+		"input": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "input_image", "file_id": fileID},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	masked, used, err := m.MaskBody(t.Context(), body)
+	if err != nil {
+		t.Fatalf("MaskBody: %v", err)
+	}
+	if len(used) != 0 {
+		t.Fatalf("expected no secrets, got %d: %+v", len(used), used)
+	}
+	if !bytes.Contains(masked, []byte(fileID)) {
+		t.Fatalf("file_id was altered: %s", masked)
+	}
+}
+
+func TestMaskBodyJSONSkipsOpenAIInputFileRawBase64(t *testing.T) {
+	// OpenAI docs show input_file.file_data with raw base64 (no data: prefix).
+	// Structural skip via type=="input_file" catches it.
+	m, _ := newMasker(t)
+	rawB64 := "JVBERi0xLjcKghp_abcdefghijklmnopqrstuvwxyz0123456789AAAA"
+	body, err := json.Marshal(map[string]any{
+		"input": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{
+						"type":      "input_file",
+						"filename":  "x.pdf",
+						"file_data": rawB64,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	masked, used, err := m.MaskBody(t.Context(), body)
+	if err != nil {
+		t.Fatalf("MaskBody: %v", err)
+	}
+	if len(used) != 0 {
+		t.Fatalf("expected no secrets, got %d: %+v", len(used), used)
+	}
+	if !bytes.Contains(masked, []byte(rawB64)) {
+		t.Fatalf("file_data was altered: %s", masked)
+	}
+}
+
 func TestMaskBodyJSONImageBlobAdjacentSecretStillMasked(t *testing.T) {
 	m, _ := newMasker(t)
 	secret := "sk-ant-api03-abcdef1234567890ABCDEFGH"

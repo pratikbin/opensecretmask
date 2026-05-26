@@ -129,22 +129,69 @@ func (m *Masker) maskBytes(ctx context.Context, body []byte, reg []regSecret) ([
 	return out, used, nil
 }
 
+// contentBlockBinaryKeys maps a multimodal content block's "type" marker to
+// the child keys whose subtrees carry opaque binary data or attachment
+// identifiers. Recursing into those subtrees lets the credential detector
+// match base64 image/PDF bytes as fake "secrets" (hundreds of false
+// positives per attachment) and rewrites short opaque file IDs that look
+// nothing like the upstream's expected value.
+//
+// Coverage spans the documented multimodal shapes across providers:
+//
+//	Anthropic Messages
+//	  {type:"image",    source:{type:"base64"|"url"|"file", ...}}  → skip "source"
+//	  {type:"document", source:{type:"base64"|"url"|"file"|"text"|"content", ...}}
+//	                                                                → skip "source"
+//	OpenAI Chat Completions
+//	  {type:"image_url", image_url:{url:"...", detail:"..."}}      → skip "image_url"
+//	OpenAI Responses API
+//	  {type:"input_image", image_url:"..."|file_id:"..."}          → skip both
+//	  {type:"input_file",  file_data:"..."|file_id:"..."|filename:"..."}
+//	                                                                → skip all three
+//
+// The Anthropic document/source can carry type=="text" plaintext as well —
+// users wanting to scan that content would need a narrower opt-in; for now,
+// blanket-skipping the whole source subtree matches the documented intent of
+// "this block is an attachment, not user text."
+var contentBlockBinaryKeys = map[string]map[string]struct{}{
+	"image":       {"source": {}},
+	"document":    {"source": {}},
+	"image_url":   {"image_url": {}},
+	"input_image": {"image_url": {}, "file_id": {}},
+	"input_file":  {"file_data": {}, "file_id": {}, "filename": {}},
+}
+
+// geminiInlineDataKeys names the part-level keys under which Gemini's
+// generateContent API nests {"mimeType":"...","data":"<base64>"} blobs.
+// Both camelCase (REST) and snake_case (gRPC / older SDKs) appear in
+// practice, so both are skipped.
+var geminiInlineDataKeys = map[string]struct{}{
+	"inlineData":  {},
+	"inline_data": {},
+}
+
 // maskJSONValue recursively masks every string leaf in v, recording the
 // secrets used by ID. Maps and slices are rewritten in place.
 //
-// Binary content blobs (images, PDFs, audio) are skipped structurally so the
-// detector never sees raw base64 — which otherwise yields hundreds of false
-// positives per attachment. Covered shapes:
-//   - Anthropic image/document: {"type":"base64","media_type":"...","data":"<b64>"}
-//   - Gemini inlineData / inline_data: {"mimeType":"...","data":"<b64>"}
-//   - OpenAI image_url / input_image / input_file: any string value starting
-//     with the "data:" URI scheme.
+// Multimodal attachment subtrees are skipped structurally — see
+// contentBlockBinaryKeys and geminiInlineDataKeys — so the detector never
+// touches base64 bytes, opaque file IDs, or vendor URLs that would otherwise
+// generate false-positive secrets. As a defence-in-depth backstop, any
+// string leaf beginning with the "data:" URI scheme is also skipped, which
+// catches data URIs embedded in unexpected places across less-canonical
+// provider dialects.
 func (m *Masker) maskJSONValue(ctx context.Context, v any, used map[int64]store.Secret, reg []regSecret) (any, error) {
 	switch t := v.(type) {
 	case map[string]any:
-		skipDataKey := isBinaryBlobMap(t)
+		var binaryKeys map[string]struct{}
+		if typ, ok := t["type"].(string); ok {
+			binaryKeys = contentBlockBinaryKeys[typ]
+		}
 		for k, child := range t {
-			if skipDataKey && k == "data" {
+			if _, skip := binaryKeys[k]; skip {
+				continue
+			}
+			if _, skip := geminiInlineDataKeys[k]; skip {
 				continue
 			}
 			nv, err := m.maskJSONValue(ctx, child, used, reg)
@@ -184,26 +231,6 @@ func (m *Masker) maskJSONValue(ctx context.Context, v any, used map[int64]store.
 	default:
 		return v, nil
 	}
-}
-
-// isBinaryBlobMap reports whether m looks like a base64 attachment container
-// whose "data" key holds opaque bytes (not user text). It matches when m has
-// a "data" entry alongside either an explicit type=="base64" marker
-// (Anthropic) or a mime-type sibling (Gemini inlineData and snake_case
-// inline_data).
-func isBinaryBlobMap(m map[string]any) bool {
-	if _, hasData := m["data"]; !hasData {
-		return false
-	}
-	if typ, ok := m["type"].(string); ok && typ == "base64" {
-		return true
-	}
-	for _, k := range []string{"mimeType", "mime_type", "media_type"} {
-		if _, ok := m[k]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 // UnmaskBody reverses MaskBody for a complete (non-streaming) response: every
