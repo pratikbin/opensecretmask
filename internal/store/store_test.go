@@ -12,7 +12,7 @@ func openTestStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 
@@ -47,13 +47,13 @@ func TestUnlockWrongPassphrase(t *testing.T) {
 	if err := s.InitCrypto(t.Context(), "right-pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
-	s.Close()
+	_ = s.Close()
 
 	s2, err := Open(t.Context(), path)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer s2.Close()
+	defer func() { _ = s2.Close() }()
 	if err := s2.Unlock(t.Context(), "wrong-pass"); !errors.Is(err, ErrWrongPassphrase) {
 		t.Fatalf("expected ErrWrongPassphrase, got %v", err)
 	}
