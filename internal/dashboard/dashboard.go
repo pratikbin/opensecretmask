@@ -1,5 +1,6 @@
-// Package dashboard serves the embedded realtime web UI: a tabbed local view of
-// the secret store and the proxied request history with per-request debugging.
+// Package dashboard serves the embedded realtime web UI: a three-pane local
+// view of the secret store and the proxied request history with per-request
+// debugging.
 package dashboard
 
 import (
@@ -13,6 +14,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +29,12 @@ var content embed.FS
 // requestRetention is how long captured requests are kept before the dashboard
 // purges them — the masked bodies are debug data, not a permanent record.
 const requestRetention = 7 * 24 * time.Hour
+
+// recentRequestsLimit caps how many recent requests the list pane shows.
+const recentRequestsLimit = 200
+
+// topSecretsLimit caps how many secrets the left rail's hot-list shows.
+const topSecretsLimit = 6
 
 // Server is the dashboard HTTP server.
 type Server struct {
@@ -44,7 +52,9 @@ func NewServer(st *store.Store, logger *slog.Logger) (*Server, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	tmpl, err := template.ParseFS(content, "templates/*.html")
+	tmpl, err := template.New("dashboard").Funcs(template.FuncMap{
+		"providerDot": providerDot,
+	}).ParseFS(content, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}
@@ -53,13 +63,15 @@ func NewServer(st *store.Store, logger *slog.Logger) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{store: st, tmpl: tmpl, mux: http.NewServeMux(), logger: logger, done: make(chan struct{})}
-	s.mux.HandleFunc("GET /{$}", s.handleOverview)
-	s.mux.HandleFunc("GET /requests", s.handleRequests)
-	s.mux.HandleFunc("GET /secrets", s.handleSecrets)
-	s.mux.HandleFunc("GET /fragments/requests", s.handleRequestsRows)
-	s.mux.HandleFunc("GET /fragments/secrets", s.handleSecretsRows)
-	s.mux.HandleFunc("GET /requests/{id}", s.handleRequestDetail)
+	s.mux.HandleFunc("GET /{$}", s.handleHome)
+	s.mux.HandleFunc("GET /requests", s.handleHome)
+	s.mux.HandleFunc("GET /requests/{id}", s.handleRequest)
 	s.mux.HandleFunc("GET /requests/{id}/reveal", s.handleRequestReveal)
+	s.mux.HandleFunc("GET /fragments/requests", s.handleListRows)
+	s.mux.HandleFunc("GET /fragments/detail/{id}", s.handleDetailPane)
+	s.mux.HandleFunc("GET /fragments/detail/{id}/reveal", s.handleDetailPaneReveal)
+	s.mux.HandleFunc("GET /secrets", s.handleSecrets)
+	s.mux.HandleFunc("GET /fragments/secrets", s.handleSecretsRows)
 	s.mux.HandleFunc("GET /secrets/{id}/reveal", s.handleReveal)
 	s.mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assetFS))))
 	s.srv = &http.Server{
@@ -114,9 +126,9 @@ func (s *Server) purgeLoop() {
 	}
 }
 
-// servePage renders a tab. An in-page htmx swap gets the bare #dash fragment; a
-// real browser navigation — first load, refresh, or history restore — gets the
-// full HTML page, so the current tab survives a reload.
+// servePage renders a tab. An in-page htmx swap gets the bare #dash fragment;
+// a real browser navigation — first load, refresh, or history restore — gets
+// the full HTML page, so deep-links and refreshes survive.
 func (s *Server) servePage(w http.ResponseWriter, r *http.Request, tab string, data any) {
 	htmxSwap := r.Header.Get("HX-Request") == "true" &&
 		r.Header.Get("HX-History-Restore-Request") != "true"
@@ -134,43 +146,196 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, tab string, d
 	s.render(w, "page", template.HTML(buf.String()))
 }
 
-type overviewVM struct {
-	Stats  store.Stats
-	Recent []store.RequestRow
+// providerCount is one provider's traffic count derived from the most recent
+// request list — loose live aggregation that needs no new SQL.
+type providerCount struct {
+	Name  string
+	Count int
 }
 
-func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
-	st, err := s.store.Stats(r.Context())
-	if err != nil {
-		s.fail(w, err)
-		return
+// providerDot maps a provider name to a Tailwind background colour class so
+// the rail and list rows can carry a tiny consistent colour marker per
+// provider without spilling style into templates.
+func providerDot(name string) string {
+	switch name {
+	case "anthropic":
+		return "bg-primary"
+	case "openai":
+		return "bg-success"
+	case "perplexity":
+		return "bg-warning"
+	case "groq":
+		return "bg-error"
+	case "google", "gemini":
+		return "bg-info"
+	case "":
+		return "bg-base-content/30"
+	default:
+		return "bg-secondary"
 	}
-	recent, err := s.store.ListRequests(r.Context(), 8)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.servePage(w, r, "overview", overviewVM{Stats: st, Recent: recent})
 }
 
-func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.store.ListRequests(r.Context(), 200)
-	if err != nil {
-		s.fail(w, err)
-		return
+func providerCountsFrom(rows []store.RequestRow) []providerCount {
+	m := map[string]int{}
+	for _, r := range rows {
+		m[r.Provider]++
 	}
-	s.servePage(w, r, "requests", rows)
+	out := make([]providerCount, 0, len(m))
+	for k, v := range m {
+		out = append(out, providerCount{Name: k, Count: v})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
 }
 
-// handleRequestsRows serves the requests table on its own — polled in place so
-// the surrounding scroll position is preserved.
-func (s *Server) handleRequestsRows(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.store.ListRequests(r.Context(), 200)
+// inspectorVM is the full view-model for the 3-pane inspector page.
+type inspectorVM struct {
+	Stats      store.Stats
+	Requests   []store.RequestRow
+	Providers  []providerCount
+	TopSecrets []store.SecretMeta
+	Detail     *detailVM
+}
+
+// detailVM is the right-pane content for one request.
+type detailVM struct {
+	R         *store.RequestDetail
+	ReqBody   template.HTML
+	RespBody  template.HTML
+	HasReq    bool
+	HasResp   bool
+	Revealed  bool
+	Originals map[string]string // mask → plaintext; populated only when Revealed
+}
+
+func (s *Server) buildInspectorVM(ctx context.Context) (*inspectorVM, error) {
+	st, err := s.store.Stats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.store.ListRequests(ctx, recentRequestsLimit)
+	if err != nil {
+		return nil, err
+	}
+	secrets, err := s.store.ListSecrets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(secrets, func(i, j int) bool {
+		if secrets[i].Hits != secrets[j].Hits {
+			return secrets[i].Hits > secrets[j].Hits
+		}
+		return secrets[i].Name < secrets[j].Name
+	})
+	if len(secrets) > topSecretsLimit {
+		secrets = secrets[:topSecretsLimit]
+	}
+	return &inspectorVM{
+		Stats:      st,
+		Requests:   rows,
+		Providers:  providerCountsFrom(rows),
+		TopSecrets: secrets,
+	}, nil
+}
+
+func (s *Server) buildDetailVM(ctx context.Context, id int64, reveal bool) (*detailVM, error) {
+	d, err := s.store.GetRequest(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	originals := make(map[string]string, len(d.Secrets))
+	if reveal {
+		for _, sec := range d.Secrets {
+			orig, err := s.store.RevealSecret(ctx, sec.ID)
+			if err != nil {
+				return nil, err
+			}
+			originals[sec.Mask] = orig
+		}
+	}
+	vm := &detailVM{R: d, Revealed: reveal, Originals: originals}
+	vm.ReqBody, vm.HasReq = bodyHTML(d.ReqBody, d.Secrets, originals, reveal)
+	vm.RespBody, vm.HasResp = bodyHTML(d.RespBody, d.Secrets, originals, reveal)
+	return vm, nil
+}
+
+func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
+	vm, err := s.buildInspectorVM(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	s.render(w, "requests_rows", rows)
+	s.servePage(w, r, "inspector", vm)
+}
+
+func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
+	s.renderRequest(w, r, false)
+}
+
+func (s *Server) handleRequestReveal(w http.ResponseWriter, r *http.Request) {
+	s.renderRequest(w, r, true)
+}
+
+// renderRequest serves /requests/{id} (and its reveal variant) as a full
+// inspector page with the right pane populated. Used for deep-links, refreshes,
+// and the htmx full-#dash swap path; row clicks use the lighter /fragments/detail
+// route below.
+func (s *Server) renderRequest(w http.ResponseWriter, r *http.Request, reveal bool) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad request id", http.StatusBadRequest)
+		return
+	}
+	d, err := s.buildDetailVM(r.Context(), id, reveal)
+	if err != nil {
+		http.Error(w, "request not found", http.StatusNotFound)
+		return
+	}
+	vm, err := s.buildInspectorVM(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	vm.Detail = d
+	s.servePage(w, r, "inspector", vm)
+}
+
+func (s *Server) handleDetailPane(w http.ResponseWriter, r *http.Request) {
+	s.renderDetailPane(w, r, false)
+}
+
+func (s *Server) handleDetailPaneReveal(w http.ResponseWriter, r *http.Request) {
+	s.renderDetailPane(w, r, true)
+}
+
+// renderDetailPane serves the right-pane content only — used by row clicks so
+// the surrounding rail / list / scroll position are untouched.
+func (s *Server) renderDetailPane(w http.ResponseWriter, r *http.Request, reveal bool) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad request id", http.StatusBadRequest)
+		return
+	}
+	d, err := s.buildDetailVM(r.Context(), id, reveal)
+	if err != nil {
+		http.Error(w, "request not found", http.StatusNotFound)
+		return
+	}
+	s.render(w, "detail_pane", d)
+}
+
+func (s *Server) handleListRows(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.store.ListRequests(r.Context(), recentRequestsLimit)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.render(w, "list_rows", rows)
 }
 
 func (s *Server) handleSecrets(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +347,6 @@ func (s *Server) handleSecrets(w http.ResponseWriter, r *http.Request) {
 	s.servePage(w, r, "secrets", secrets)
 }
 
-// handleSecretsRows serves the secrets table on its own for in-place polling.
 func (s *Server) handleSecretsRows(w http.ResponseWriter, r *http.Request) {
 	secrets, err := s.store.ListSecrets(r.Context())
 	if err != nil {
@@ -192,51 +356,18 @@ func (s *Server) handleSecretsRows(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "secrets_rows", secrets)
 }
 
-func (s *Server) handleRequestDetail(w http.ResponseWriter, r *http.Request) {
-	s.renderDetail(w, r, false)
-}
-
-func (s *Server) handleRequestReveal(w http.ResponseWriter, r *http.Request) {
-	s.renderDetail(w, r, true)
-}
-
-type detailVM struct {
-	R        *store.RequestDetail
-	ReqBody  template.HTML
-	RespBody template.HTML
-	HasReq   bool
-	HasResp  bool
-	Revealed bool
-}
-
-// renderDetail builds the per-request debug view. When reveal is set the
-// captured masked bodies are unmasked back to plaintext for inspection.
-func (s *Server) renderDetail(w http.ResponseWriter, r *http.Request, reveal bool) {
+func (s *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		http.Error(w, "bad request id", http.StatusBadRequest)
+		http.Error(w, "bad secret id", http.StatusBadRequest)
 		return
 	}
-	d, err := s.store.GetRequest(r.Context(), id)
+	value, err := s.store.RevealSecret(r.Context(), id)
 	if err != nil {
-		http.Error(w, "request not found", http.StatusNotFound)
+		s.fail(w, err)
 		return
 	}
-	originals := make(map[string]string, len(d.Secrets))
-	if reveal {
-		for _, sec := range d.Secrets {
-			orig, err := s.store.RevealSecret(r.Context(), sec.ID)
-			if err != nil {
-				s.fail(w, err)
-				return
-			}
-			originals[sec.Mask] = orig
-		}
-	}
-	vm := detailVM{R: d, Revealed: reveal}
-	vm.ReqBody, vm.HasReq = bodyHTML(d.ReqBody, d.Secrets, originals, reveal)
-	vm.RespBody, vm.HasResp = bodyHTML(d.RespBody, d.Secrets, originals, reveal)
-	s.servePage(w, r, "request_detail", vm)
+	s.render(w, "reveal", value)
 }
 
 // bodyHTML pretty-prints a captured body, HTML-escapes it, and wraps every
@@ -275,20 +406,6 @@ func bodyHTML(raw []byte, secrets []store.SecretMeta, originals map[string]strin
 		out = strings.ReplaceAll(out, esc, `<mark class="`+cls+`">`+esc+`</mark>`)
 	}
 	return template.HTML(out), true // #nosec G203 -- out is HTML-escaped; only hardcoded <mark> tags are injected
-}
-
-func (s *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		http.Error(w, "bad secret id", http.StatusBadRequest)
-		return
-	}
-	value, err := s.store.RevealSecret(r.Context(), id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.render(w, "reveal", value)
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, data any) {

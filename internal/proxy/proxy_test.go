@@ -1,4 +1,4 @@
-package proxy
+package proxy_test
 
 import (
 	"crypto/tls"
@@ -11,10 +11,24 @@ import (
 	"strings"
 	"testing"
 
+	"go.uber.org/goleak"
+
 	"github.com/pratikbin/opensecretmask/internal/detect"
 	"github.com/pratikbin/opensecretmask/internal/mask"
+	"github.com/pratikbin/opensecretmask/internal/proxy"
 	"github.com/pratikbin/opensecretmask/internal/store"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m,
+		// goproxy spawns per-CONNECT tunnel goroutines (anonymous closures) that
+		// outlive the request but are cleaned up when the server closes.
+		goleak.IgnoreAnyFunction("github.com/elazarl/goproxy.(*ProxyHttpServer).handleHttps.func4"),
+		// net/http Transport keep-alive loops exit when the connection is closed.
+		goleak.IgnoreAnyFunction("net/http.(*persistConn).readLoop"),
+		goleak.IgnoreAnyFunction("net/http.(*persistConn).writeLoop"),
+	)
+}
 
 const testSecret = "sk-ant-api03-supersecretvalue1234567890ABCDEF"
 
@@ -45,7 +59,7 @@ func newProxyHarness(t *testing.T, upstream http.Handler, paths ...string) *prox
 		t.Fatalf("detect.New: %v", err)
 	}
 
-	ca, err := GenerateCA()
+	ca, err := proxy.GenerateCA()
 	if err != nil {
 		t.Fatalf("GenerateCA: %v", err)
 	}
@@ -57,8 +71,8 @@ func newProxyHarness(t *testing.T, upstream http.Handler, paths ...string) *prox
 	upstreamPool := x509.NewCertPool()
 	upstreamPool.AddCert(up.Certificate())
 
-	srv := NewServer(Config{
-		Providers:   []Provider{{Host: hostOnly(upURL.Host), Dialect: "anthropic", Paths: paths}},
+	srv := proxy.NewServer(proxy.Config{
+		Providers:   []proxy.Provider{{Host: upURL.Hostname(), Dialect: "anthropic", Paths: paths}},
 		CA:          ca,
 		Masker:      mask.NewMasker(st, det),
 		Store:       st,
@@ -208,13 +222,13 @@ func TestProxyTunnelsNonLLMHostUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("detect.New: %v", err)
 	}
-	ca, err := GenerateCA()
+	ca, err := proxy.GenerateCA()
 	if err != nil {
 		t.Fatalf("GenerateCA: %v", err)
 	}
 	// No providers configured -> nothing is intercepted.
-	srv := NewServer(Config{
-		Providers: []Provider{{Host: "api.anthropic.com", Dialect: "anthropic"}},
+	srv := proxy.NewServer(proxy.Config{
+		Providers: []proxy.Provider{{Host: "api.anthropic.com", Dialect: "anthropic"}},
 		CA:        ca,
 		Masker:    mask.NewMasker(st, det),
 		Store:     st,

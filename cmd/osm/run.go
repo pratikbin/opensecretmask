@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -8,12 +9,21 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/pratikbin/opensecretmask/internal/proxy"
 )
+
+// watchdogInterval is how often 'osm run' probes the daemon's TCP listener
+// while the child is alive. Set short enough that a silent daemon SIGKILL
+// causes only ~1 retry's worth of failed requests in the child before the
+// listener is back up on the same address.
+const watchdogInterval = 2 * time.Second
 
 func runCmd() *cobra.Command {
 	var (
@@ -37,7 +47,7 @@ func runCmd() *cobra.Command {
 			"Trust is per-process: the env vars make Node, Python and curl trust\n" +
 			"the osm CA without touching the system trust store.",
 		Args: cobra.MinimumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			home, err := homeDir()
 			if err != nil {
 				return err
@@ -58,14 +68,15 @@ func runCmd() *cobra.Command {
 			// prompt entirely and reuse it. The daemon already has the store
 			// unlocked from its own startup.
 			p, _ := readPidFile(home)
+			var osmKey string
+			opts := daemonOpts{extra: extra, entropy: entropy, logLevel: logLevel}
 			if !daemonHealthy(p) {
 				key, kerr := passphrase()
 				if kerr != nil {
 					return kerr
 				}
-				np, _, derr := ensureDaemon(home, listen, dash, key, daemonOpts{
-					extra: extra, entropy: entropy, logLevel: logLevel,
-				})
+				osmKey = key
+				np, _, derr := ensureDaemon(home, listen, dash, key, opts)
 				if derr != nil {
 					return derr
 				}
@@ -73,7 +84,21 @@ func runCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "osm: started daemon pid=%d proxy=http://%s dashboard=http://%s\n",
 					p.PID, p.ProxyAddr, p.DashAddr)
 			} else {
+				// Reuse path: prefer $OSM_KEY for silent watchdog respawn. If
+				// unset, the daemon is still usable now but a mid-session
+				// death will require a manual restart with $OSM_KEY exported.
+				osmKey = os.Getenv(keyEnv)
 				fmt.Fprintf(os.Stderr, "osm: reusing daemon pid=%d proxy=http://%s\n", p.PID, p.ProxyAddr)
+				if osmKey == "" {
+					fmt.Fprintf(os.Stderr, "osm: warning — $OSM_KEY unset; daemon auto-respawn disabled. Export OSM_KEY to enable.\n")
+				}
+				// Inherit prior spawn config so a respawn produces the same
+				// listener addresses, providers, entropy and log level.
+				opts.extra = p.Extra
+				opts.entropy = p.Entropy
+				if p.LogLevel != "" {
+					opts.logLevel = p.LogLevel
+				}
 			}
 
 			proxyURL := "http://" + p.ProxyAddr
@@ -89,7 +114,17 @@ func runCmd() *cobra.Command {
 				"REQUESTS_CA_BUNDLE":  certPath, // Python requests
 				"CURL_CA_BUNDLE":      certPath, // curl
 			})
+
+			ctx, cancel := context.WithCancel(cmd.Context())
+			defer cancel()
+			var wg sync.WaitGroup
+			wg.Go(func() {
+				watchDaemon(ctx, home, p, osmKey, opts)
+			})
+
 			code, rerr := runChild(bin, args, env)
+			cancel()
+			wg.Wait()
 			if rerr != nil {
 				return rerr
 			}
@@ -147,6 +182,51 @@ func runChild(bin string, args, env []string) (int, error) {
 		return 0, err
 	}
 	return 0, nil
+}
+
+// watchDaemon polls the daemon's TCP listener while the child is alive and
+// respawns it on the same address if it disappears (silent SIGKILL, macOS
+// sudden_termination on sleep, manual kill). Because the child inherits a
+// fixed HTTPS_PROXY URL pointing at p.ProxyAddr, the respawn must rebind
+// that exact address — passing it explicitly to ensureDaemon forces this.
+//
+// If osmKey is empty (reuse path with no $OSM_KEY in env), respawn is
+// disabled: the new daemon would fail to unlock the store and exit, which
+// would loop. The warning is logged once at startup in runCmd.
+func watchDaemon(ctx context.Context, home string, p *pidInfo, osmKey string, opts daemonOpts) {
+	if osmKey == "" {
+		return
+	}
+	addr := p.ProxyAddr
+	dash := p.DashAddr
+	var inflight atomic.Bool
+	t := time.NewTicker(watchdogInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		cur, _ := readPidFile(home)
+		if daemonHealthy(cur) {
+			continue
+		}
+		// CompareAndSwap so a long respawn does not stack a second attempt.
+		if !inflight.CompareAndSwap(false, true) {
+			continue
+		}
+		go func() {
+			defer inflight.Store(false)
+			fmt.Fprintf(os.Stderr, "osm: daemon died — respawning on %s\n", addr)
+			np, _, err := ensureDaemon(home, addr, dash, osmKey, opts)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "osm: respawn failed: %v\n", err)
+				return
+			}
+			fmt.Fprintf(os.Stderr, "osm: daemon respawned pid=%d\n", np.PID)
+		}()
+	}
 }
 
 // withEnv returns base with the given keys overridden — any existing entries

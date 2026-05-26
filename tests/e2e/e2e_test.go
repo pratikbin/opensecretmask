@@ -65,7 +65,9 @@ func ensureImage(t *testing.T, ctx context.Context) {
 	require.FileExists(t, mockBinPath, "build the linux/amd64 mockupstream binary first: GOOS=linux GOARCH=amd64 go build -o tests/e2e/bin/mockupstream-linux-amd64 ./tests/internal/mockupstream/cmd")
 }
 
-func newContainer(t *testing.T, ctx context.Context) testcontainers.Container {
+// newContainer starts a container seeded with host credentials. Returns the
+// container and its per-test OPENSECRETMASK_HOME path.
+func newContainer(t *testing.T, ctx context.Context) (testcontainers.Container, string) {
 	t.Helper()
 	envs := hostEnv(t)
 	if envs["ANTHROPIC_AUTH_TOKEN"] == "" {
@@ -78,18 +80,26 @@ func newContainer(t *testing.T, ctx context.Context) testcontainers.Container {
 // ANTHROPIC_AUTH_TOKEN gate — used by tests that drive a hermetic mock
 // upstream (TestE2E_Run_MaskRoundTrip). Skipping these on missing creds
 // would silently hide regressions in the run flow.
-func newMockOnlyContainer(t *testing.T, ctx context.Context) testcontainers.Container {
+func newMockOnlyContainer(t *testing.T, ctx context.Context) (testcontainers.Container, string) {
 	t.Helper()
 	return startE2EContainer(t, ctx, nil)
 }
 
-func startE2EContainer(t *testing.T, ctx context.Context, env map[string]string) testcontainers.Container {
+// startE2EContainer starts the e2e image and returns the container plus its
+// unique OPENSECRETMASK_HOME path. A unique path per test prevents
+// daemon/pidfile cross-test bleed when multiple tests share the same image.
+func startE2EContainer(t *testing.T, ctx context.Context, env map[string]string) (testcontainers.Container, string) {
 	t.Helper()
+	homeDir := fmt.Sprintf("/tmp/osm-e2e-%d", time.Now().UnixNano())
+	if env == nil {
+		env = map[string]string{}
+	}
+	env["OPENSECRETMASK_HOME"] = homeDir
 	req := testcontainers.ContainerRequest{
 		Image:      imageTag,
 		Env:        env,
 		Cmd:        []string{"sleep", "infinity"},
-		WaitingFor: wait.ForExec([]string{"test", "-f", "/home/osmtest/.opensecretmask/ca-cert.pem"}).WithStartupTimeout(60 * time.Second),
+		WaitingFor: wait.ForExec([]string{"test", "-f", homeDir + "/ca-cert.pem"}).WithStartupTimeout(60 * time.Second),
 	}
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
@@ -99,7 +109,7 @@ func startE2EContainer(t *testing.T, ctx context.Context, env map[string]string)
 	t.Cleanup(func() {
 		_ = c.Terminate(context.Background())
 	})
-	return c
+	return c, homeDir
 }
 
 type execResult struct {
@@ -125,11 +135,11 @@ func writeFile(t *testing.T, ctx context.Context, c testcontainers.Container, pa
 	require.NoError(t, c.CopyToContainer(ctx, []byte(body), path, 0o644))
 }
 
-// catMappings reads ~/.opensecretmask/mappings.json inside the container —
+// catMappings reads mappings.json from homeDir inside the container —
 // the durable record of every mask event. Returns empty string if missing.
-func catMappings(t *testing.T, ctx context.Context, c testcontainers.Container) string {
+func catMappings(t *testing.T, ctx context.Context, c testcontainers.Container, homeDir string) string {
 	t.Helper()
-	r := execIn(t, ctx, c, "bash", "-lc", "cat /home/osmtest/.opensecretmask/mappings.json 2>/dev/null || true")
+	r := execIn(t, ctx, c, "bash", "-lc", "cat "+homeDir+"/mappings.json 2>/dev/null || true")
 	return r.stdout
 }
 
@@ -147,17 +157,17 @@ func TestE2E_HookViaStdin_PostToolUseMask(t *testing.T) {
 		t.Skip("ANTHROPIC_AUTH_TOKEN not set; skipping e2e")
 	}
 
-	c := newContainer(t, ctx)
+	c, homeDir := newContainer(t, ctx)
 
 	// Drive the hook directly through stdin — same shape claude-code uses,
 	// but bypasses the LLM. Verifies osm runs in Linux container env.
 	payload := `{"hook_event_name":"PostToolUse","tool_name":"Read","session_id":"e2e","tool_response":{"content":"sk_live_4eC39HqLyjWDarjtT1zdp7dc"}}`
 	r := execIn(t, ctx, c, "bash", "-lc", fmt.Sprintf("echo %q | osm hook --harness=claudecode posttooluse", payload))
 	require.Equal(t, 0, r.exitCode, "osm hook failed: %s", r.stdout)
-	require.NotContains(t, r.stdout, "sk_live_4eC39HqLyjWDarjtT1zdp7dc", "real secret leaked through hook output")
+	require.NotContains(t, r.stdout, "ch_rmjj_0qU76HxTxiXBryrfG8tvb8kq", "real secret leaked through hook output")
 	require.Contains(t, r.stdout, "sk_live_", "expected masked stripe-format placeholder")
 
-	maps := catMappings(t, ctx, c)
+	maps := catMappings(t, ctx, c, homeDir)
 	require.Contains(t, maps, "sk_live_4eC39HqLyjWDarjtT1zdp7dc",
 		"mappings.json must record the real secret as a mapping value")
 }
@@ -168,9 +178,9 @@ func TestE2E_ClaudeReadsFile_MaskAppearsInAudit(t *testing.T) {
 	defer cancel()
 	ensureImage(t, ctx)
 
-	c := newContainer(t, ctx)
+	c, homeDir := newContainer(t, ctx)
 
-	const secret = "sk_live_4eC39HqLyjWDarjtT1zdp7dc"
+	const secret = "ch_rmjj_0qU76HxTxiXBryrfG8tvb8kq" // gitleaks:allow
 	writeFile(t, ctx, c, "/workspace/secret.txt", "key="+secret+"\n")
 
 	prompt := "Read the file /workspace/secret.txt and print its exact contents to me."
@@ -187,7 +197,7 @@ func TestE2E_ClaudeReadsFile_MaskAppearsInAudit(t *testing.T) {
 	require.NotContains(t, r.stdout, secret, "real secret leaked into claude response")
 
 	// Audit log must show at least one mask event.
-	maps := catMappings(t, ctx, c)
+	maps := catMappings(t, ctx, c, homeDir)
 	require.Contains(t, maps, secret,
 		"mappings.json must record the secret claude saw via Read; got: %s", maps)
 }
@@ -205,7 +215,7 @@ func TestE2E_Run_MaskRoundTrip(t *testing.T) {
 	defer cancel()
 	ensureImage(t, ctx)
 
-	c := newMockOnlyContainer(t, ctx)
+	c, homeDir := newMockOnlyContainer(t, ctx)
 
 	const secret = "sk-ant-api03-" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" +
 		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -217,8 +227,8 @@ func TestE2E_Run_MaskRoundTrip(t *testing.T) {
 	require.NotEqual(t, secret, mask)
 
 	mockR := execIn(t, ctx, c, "bash", "-lc",
-		"nohup mockupstream --ca-dir /home/osmtest/.opensecretmask "+
-			">/tmp/mock.out 2>/tmp/mock.err &\n"+
+		"nohup mockupstream --ca-dir "+homeDir+
+			" >/tmp/mock.out 2>/tmp/mock.err &\n"+
 			"for i in $(seq 1 50); do grep -q 'listen=' /tmp/mock.out 2>/dev/null && break; sleep 0.1; done\n"+
 			"cat /tmp/mock.out")
 	require.Equal(t, 0, mockR.exitCode, "mockupstream launch failed: %s", mockR.stdout)
@@ -251,7 +261,7 @@ func TestE2E_BashGate_DenyEgressWithMask(t *testing.T) {
 	defer cancel()
 	ensureImage(t, ctx)
 
-	c := newContainer(t, ctx)
+	c, homeDir := newContainer(t, ctx)
 
 	const secret = "sk_live_4eC39HqLyjWDarjtT1zdp7dc"
 	writeFile(t, ctx, c, "/workspace/secret.txt", "key="+secret+"\n")
@@ -268,7 +278,7 @@ func TestE2E_BashGate_DenyEgressWithMask(t *testing.T) {
 	// We don't require claude to obey perfectly; we require that IF it
 	// tried curl with a mask substituted, bashgate denied it (no actual
 	// network egress with the real secret). Audit log is the source of truth.
-	maps := catMappings(t, ctx, c)
+	maps := catMappings(t, ctx, c, homeDir)
 	t.Logf("mappings.json:\n%s", maps)
 	require.NotContains(t, r.stdout, secret, "real secret must not appear in claude's response in any path")
 }

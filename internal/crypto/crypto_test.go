@@ -19,6 +19,7 @@ func newTestCipher(t *testing.T, pass string) *Cipher {
 }
 
 func TestEncryptRoundTrip(t *testing.T) {
+	t.Parallel()
 	c := newTestCipher(t, "correct horse battery staple")
 	want := []byte("sk-ant-api03-realsecretvalue")
 	blob, err := c.Encrypt(want)
@@ -38,6 +39,7 @@ func TestEncryptRoundTrip(t *testing.T) {
 }
 
 func TestEncryptNonceUnique(t *testing.T) {
+	t.Parallel()
 	c := newTestCipher(t, "pass")
 	a, _ := c.Encrypt([]byte("same"))
 	b, _ := c.Encrypt([]byte("same"))
@@ -47,6 +49,7 @@ func TestEncryptNonceUnique(t *testing.T) {
 }
 
 func TestWrongPassphraseRejected(t *testing.T) {
+	t.Parallel()
 	salt, _ := NewSalt()
 	good, _ := NewCipher("right-pass", salt)
 	bad, _ := NewCipher("wrong-pass", salt)
@@ -57,6 +60,7 @@ func TestWrongPassphraseRejected(t *testing.T) {
 }
 
 func TestDecryptShortBlob(t *testing.T) {
+	t.Parallel()
 	c := newTestCipher(t, "pass")
 	if _, err := c.Decrypt([]byte("tiny")); err != ErrDecrypt {
 		t.Fatalf("expected ErrDecrypt for short blob, got %v", err)
@@ -64,6 +68,7 @@ func TestDecryptShortBlob(t *testing.T) {
 }
 
 func TestIndexDeterministic(t *testing.T) {
+	t.Parallel()
 	c := newTestCipher(t, "pass")
 	a := c.Index([]byte("token"))
 	b := c.Index([]byte("token"))
@@ -76,6 +81,7 @@ func TestIndexDeterministic(t *testing.T) {
 }
 
 func TestIndexKeySeparation(t *testing.T) {
+	t.Parallel()
 	salt, _ := NewSalt()
 	c1, _ := NewCipher("pass-one", salt)
 	c2, _ := NewCipher("pass-two", salt)

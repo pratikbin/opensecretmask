@@ -1,14 +1,22 @@
-package store
+package store_test
 
 import (
 	"errors"
 	"path/filepath"
 	"testing"
+
+	"go.uber.org/goleak"
+
+	"github.com/pratikbin/opensecretmask/internal/store"
 )
 
-func openTestStore(t *testing.T) *Store {
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
+
+func openTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
+	s, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -40,7 +48,7 @@ func TestInitAndUnlock(t *testing.T) {
 
 func TestUnlockWrongPassphrase(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.db")
-	s, err := Open(t.Context(), path)
+	s, err := store.Open(t.Context(), path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -49,12 +57,12 @@ func TestUnlockWrongPassphrase(t *testing.T) {
 	}
 	_ = s.Close()
 
-	s2, err := Open(t.Context(), path)
+	s2, err := store.Open(t.Context(), path)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer func() { _ = s2.Close() }()
-	if err := s2.Unlock(t.Context(), "wrong-pass"); !errors.Is(err, ErrWrongPassphrase) {
+	if err := s2.Unlock(t.Context(), "wrong-pass"); !errors.Is(err, store.ErrWrongPassphrase) {
 		t.Fatalf("expected ErrWrongPassphrase, got %v", err)
 	}
 	if err := s2.Unlock(t.Context(), "right-pass"); err != nil {
@@ -67,7 +75,7 @@ func TestUnlockWrongPassphrase(t *testing.T) {
 
 func TestLockedRejectsSecretOps(t *testing.T) {
 	s := openTestStore(t)
-	if _, err := s.PutSecret(t.Context(), Secret{Original: "x", Mask: "m"}); !errors.Is(err, ErrLocked) {
+	if _, err := s.PutSecret(t.Context(), store.Secret{Original: "x", Mask: "m"}); !errors.Is(err, store.ErrLocked) {
 		t.Fatalf("expected ErrLocked from PutSecret on locked store, got %v", err)
 	}
 }
@@ -77,11 +85,11 @@ func TestPutGetSecret(t *testing.T) {
 	if err := s.InitCrypto(t.Context(), "pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
-	sec := Secret{
+	sec := store.Secret{
 		Name:     "ANTHROPIC_API_KEY",
 		Source:   "registered",
-		Original: "sk-ant-api03-realvalue1234567890",
-		Mask:     "sk-ant-api03-maskedAAAA1234567890",
+		Original: "sk-ant-nrh80-gnililegs0110247876",
+		Mask:     "sk-ant-awh17-qnqrlkRMZD1320637819",
 		Shape:    "sk-ant-api03-{32}",
 	}
 	id, err := s.PutSecret(t.Context(), sec)
@@ -114,7 +122,7 @@ func TestPutSecretDedup(t *testing.T) {
 	if err := s.InitCrypto(t.Context(), "pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
-	sec := Secret{
+	sec := store.Secret{
 		Name: "K", Source: "registered",
 		Original: "duplicate-secret-value",
 		Mask:     "mask-aaaa", Shape: "{22}",
@@ -138,7 +146,7 @@ func TestListRevealTouch(t *testing.T) {
 	if err := s.InitCrypto(t.Context(), "pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
-	id, err := s.PutSecret(t.Context(), Secret{
+	id, err := s.PutSecret(t.Context(), store.Secret{
 		Name: "K", Source: "registered",
 		Original: "reveal-me", Mask: "m1", Shape: "{9}",
 	})
