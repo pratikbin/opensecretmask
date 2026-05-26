@@ -81,7 +81,7 @@ func TestEntropyLayerToggle(t *testing.T) {
 
 func repeat(s string, n int) string {
 	out := make([]byte, 0, len(s)*n)
-	for i := 0; i < n; i++ {
+	for range n {
 		out = append(out, s...)
 	}
 	return string(out)
@@ -107,6 +107,46 @@ func TestLLMProviderMatches(t *testing.T) {
 		{`Authorization: Bearer pplx-` + repeat("a", 45), "Perplexity API Key"},
 		{`{"k":"ABSK` + repeat("A", 110) + `"}`, "AWS Bedrock Long-Lived Key"},
 		{`X-Bedrock: bedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29t`, "AWS Bedrock Short-Lived Key"},
+	}
+	for _, tc := range cases {
+		assertRuleFires(t, d, tc.body, tc.rule)
+	}
+}
+
+func TestDevtoolsProviderMatches(t *testing.T) {
+	d := newDetector(t, Config{})
+	cases := []struct {
+		body string
+		rule string
+	}{
+		{`pscale_tkn_` + repeat("a", 40), "PlanetScale API Token"},
+		{`pscale_oauth_` + repeat("a", 40), "PlanetScale OAuth Token"},
+		{`pscale_pw_` + repeat("a", 40), "PlanetScale Password"},
+		{`PMAK-` + repeat("a", 24) + `-` + repeat("b", 34), "Postman API Token"},
+		{`pnu_` + repeat("a", 36), "Prefect API Token"},
+		{`sgp_` + repeat("a", 40), "Sourcegraph Access Token"},
+		{`tfp_` + repeat("a", 59), "Typeform API Token"},
+		{`ico-` + repeat("a", 32), "Infracost API Token"},
+		{`ops_eyJ` + repeat("a", 260), "1Password Service Account"},
+		{`A3-ABCDEF-ABCDEFGHIJK-ABCDE-FGHIJ-KLMNO`, "1Password Secret Key"},
+	}
+	for _, tc := range cases {
+		assertRuleFires(t, d, tc.body, tc.rule)
+	}
+}
+
+func TestCloudRound2Matches(t *testing.T) {
+	d := newDetector(t, Config{})
+	cases := []struct {
+		body string
+		rule string
+	}{
+		{`xkeysib-` + repeat("a", 64) + `-` + repeat("A", 16), "Sendinblue API Token"},
+		{`shpat_` + repeat("a", 32), "Shopify Access Token"},
+		{`shpca_` + repeat("a", 32), "Shopify Custom Access Token"},
+		{`shppa_` + repeat("a", 32), "Shopify Private App Access Token"},
+		{`sq0atp-` + repeat("a", 30), "Square Access Token"},
+		{`EAAA` + repeat("a", 30), "Square Access Token"},
 	}
 	for _, tc := range cases {
 		assertRuleFires(t, d, tc.body, tc.rule)

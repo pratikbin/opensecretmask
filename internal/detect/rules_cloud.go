@@ -20,6 +20,11 @@ var cloudRules = []Rule{
 	{"Heroku API Key v2", "critical", regexp.MustCompile(`HRKU-AA[A-Za-z0-9_\-]{20,}`), 0},
 	{"Docker PAT", "critical", regexp.MustCompile(`dckr_pat_[A-Za-z0-9_\-]{27,}`), 0},
 	{"Netlify Access Token", "critical", regexp.MustCompile(`nfp_[A-Za-z0-9]{40,}`), 0},
+	{"Sendinblue API Token", "critical", regexp.MustCompile(`xkeysib-[a-f0-9]{64}-[a-zA-Z0-9]{16}`), 0},
+	{"Shopify Access Token", "critical", regexp.MustCompile(`shpat_[a-fA-F0-9]{32}`), 0},
+	{"Shopify Custom Access Token", "critical", regexp.MustCompile(`shpca_[a-fA-F0-9]{32}`), 0},
+	{"Shopify Private App Access Token", "critical", regexp.MustCompile(`shppa_[a-fA-F0-9]{32}`), 0},
+	{"Square Access Token", "critical", regexp.MustCompile(`(?:EAAA|sq0atp-)[A-Za-z0-9_\-]{22,60}`), 0},
 }
 
 type cloudProvider struct{}
