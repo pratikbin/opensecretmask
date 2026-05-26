@@ -5,7 +5,8 @@ E2E_BIN_DIR := tests/e2e/bin
 E2E_IMAGE := osm-e2e:dev
 
 build:
-	go build -o $(BIN) ./cmd/osm
+	rm ~/tools/$(BIN)
+	go build -trimpath -ldflags="-s -w" -o ~/tools/$(BIN) ./cmd/osm
 
 test:
 	go test -race ./...
