@@ -61,7 +61,7 @@ func (s *Store) ListRequests(ctx context.Context, limit int) ([]RequestRow, erro
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []RequestRow
 	for rows.Next() {
 		var r RequestRow

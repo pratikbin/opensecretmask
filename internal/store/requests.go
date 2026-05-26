@@ -112,7 +112,7 @@ func (s *Store) requestSecrets(ctx context.Context, requestID int64) ([]SecretMe
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []SecretMeta
 	for rows.Next() {
 		var m SecretMeta
