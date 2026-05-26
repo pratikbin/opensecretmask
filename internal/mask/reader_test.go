@@ -10,6 +10,7 @@ import (
 )
 
 func TestUnmaskReader(t *testing.T) {
+	t.Parallel()
 	secrets := []store.Secret{{Original: "REALSECRETVALUE", Mask: "fakemaskedDATA0"}}
 	src := io.NopCloser(strings.NewReader("event: data\nmask=fakemaskedDATA0 end"))
 
@@ -24,6 +25,7 @@ func TestUnmaskReader(t *testing.T) {
 }
 
 func TestUnmaskReaderOneByteAtATime(t *testing.T) {
+	t.Parallel()
 	secrets := []store.Secret{{Original: "REALSECRETVALUE", Mask: "fakemaskedDATA0"}}
 	src := io.NopCloser(iotest.OneByteReader(strings.NewReader("x fakemaskedDATA0 y")))
 
@@ -37,6 +39,7 @@ func TestUnmaskReaderOneByteAtATime(t *testing.T) {
 }
 
 func TestUnmaskReaderNoSecrets(t *testing.T) {
+	t.Parallel()
 	src := io.NopCloser(strings.NewReader("plain passthrough body"))
 	got, err := io.ReadAll(NewUnmaskReader(src, nil))
 	if err != nil {

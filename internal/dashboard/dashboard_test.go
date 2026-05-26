@@ -1,6 +1,8 @@
-package dashboard
+package dashboard_test
 
 import (
+	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -8,10 +10,17 @@ import (
 	"strings"
 	"testing"
 
+	"go.uber.org/goleak"
+
+	"github.com/pratikbin/opensecretmask/internal/dashboard"
 	"github.com/pratikbin/opensecretmask/internal/store"
 )
 
-func newTestServer(t *testing.T) (*Server, *store.Store) {
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
+
+func newTestServer(t *testing.T) (*dashboard.Server, *store.Store) {
 	t.Helper()
 	st, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "d.db"))
 	if err != nil {
@@ -21,7 +30,7 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 	if err := st.InitCrypto(t.Context(), "pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
-	srv, err := NewServer(st, nil)
+	srv, err := dashboard.NewServer(st, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -83,8 +92,8 @@ func TestDashboardTabPersistence(t *testing.T) {
 
 func TestDashboardTabsAndDebug(t *testing.T) {
 	srv, st := newTestServer(t)
-	const original = "sk-ant-atvk-buuzkw-kjufj-5830"
-	const masked = "sk-ant-wwcpympprjrtnfxw2529185"
+	const original = "sk-ant-jjhg-joiibe-ljioc-8088"
+	const masked = "sk-ant-bteyavngogmphqri2758983"
 	secID, err := st.PutSecret(t.Context(), store.Secret{
 		Name: "ANTHROPIC_API_KEY", Source: "registered",
 		Original: original, Mask: masked, Shape: "shape",
@@ -164,5 +173,29 @@ func TestDashboardBadRequestID(t *testing.T) {
 	}
 	if code, _ := get(t, h, "/requests/99999"); code != http.StatusNotFound {
 		t.Fatalf("missing request status = %d, want 404", code)
+	}
+}
+
+// TestDashboardServeShutdown verifies that Serve + Shutdown terminates cleanly
+// with no goroutine leaks (purgeLoop must exit via the done channel).
+func TestDashboardServeShutdown(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen: %v", err)
+	}
+
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.Serve(ln) }()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*000_000_000) // 5 s
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	if err := <-serveErr; err != http.ErrServerClosed {
+		t.Fatalf("Serve returned %v, want http.ErrServerClosed", err)
 	}
 }

@@ -1,6 +1,17 @@
 package detect
 
-import "testing"
+import (
+	"sync"
+	"testing"
+)
+
+var sharedDetector = sync.OnceValue(func() *Detector {
+	d, err := New(Config{}, DefaultProviders()...)
+	if err != nil {
+		panic("sharedDetector: " + err.Error())
+	}
+	return d
+})
 
 func newDetector(t *testing.T, cfg Config) *Detector {
 	t.Helper()
@@ -12,7 +23,8 @@ func newDetector(t *testing.T, cfg Config) *Detector {
 }
 
 func TestAllRulesCompile(t *testing.T) {
-	d := newDetector(t, Config{})
+	t.Parallel()
+	d := sharedDetector()
 	var want int
 	for _, p := range DefaultProviders() {
 		want += len(p.Rules())
@@ -26,7 +38,8 @@ func TestAllRulesCompile(t *testing.T) {
 }
 
 func TestScanFindsCredentials(t *testing.T) {
-	d := newDetector(t, Config{})
+	t.Parallel()
+	d := sharedDetector()
 	body := []byte(`{"content":"key sk-ant-api03-abcdef1234567890ABCDEF and ghp_abcdefghijklmnopqrstuvwxyz0123456789"}`)
 	want := map[string]string{
 		"sk-ant-api03-abcdef1234567890ABCDEF":      "Anthropic API Key",
@@ -44,7 +57,8 @@ func TestScanFindsCredentials(t *testing.T) {
 }
 
 func TestScanContextRuleCapturesSecretOnly(t *testing.T) {
-	d := newDetector(t, Config{})
+	t.Parallel()
+	d := sharedDetector()
 	got := d.Scan([]byte(`API_SECRET_KEY=s3cr3tValuePayload123`))
 	if len(got) != 1 {
 		t.Fatalf("expected 1 finding, got %+v", got)
@@ -55,7 +69,8 @@ func TestScanContextRuleCapturesSecretOnly(t *testing.T) {
 }
 
 func TestLiteralPrefixLen(t *testing.T) {
-	d := newDetector(t, Config{})
+	t.Parallel()
+	d := sharedDetector()
 	if got := d.LiteralPrefixLen("sk-ant-api03-xxxxxxxxxx"); got != len("sk-ant-") {
 		t.Fatalf("Anthropic key prefix len = %d, want %d", got, len("sk-ant-"))
 	}
@@ -65,6 +80,7 @@ func TestLiteralPrefixLen(t *testing.T) {
 }
 
 func TestEntropyLayerToggle(t *testing.T) {
+	t.Parallel()
 	body := []byte("token Xq7mK2pLz9wRt4vNc8bYf3hJd6sGa1e here")
 
 	off := newDetector(t, Config{})
@@ -99,7 +115,8 @@ func assertRuleFires(t *testing.T, d *Detector, body, rule string) {
 }
 
 func TestLLMProviderMatches(t *testing.T) {
-	d := newDetector(t, Config{})
+	t.Parallel()
+	d := sharedDetector()
 	cases := []struct {
 		body string
 		rule string
@@ -109,12 +126,16 @@ func TestLLMProviderMatches(t *testing.T) {
 		{`X-Bedrock: bedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29t`, "AWS Bedrock Short-Lived Key"},
 	}
 	for _, tc := range cases {
-		assertRuleFires(t, d, tc.body, tc.rule)
+		t.Run(tc.rule, func(t *testing.T) {
+			t.Parallel()
+			assertRuleFires(t, d, tc.body, tc.rule)
+		})
 	}
 }
 
 func TestDevtoolsProviderMatches(t *testing.T) {
-	d := newDetector(t, Config{})
+	t.Parallel()
+	d := sharedDetector()
 	cases := []struct {
 		body string
 		rule string
@@ -131,12 +152,16 @@ func TestDevtoolsProviderMatches(t *testing.T) {
 		{`A3-ABCDEF-ABCDEFGHIJK-ABCDE-FGHIJ-KLMNO`, "1Password Secret Key"},
 	}
 	for _, tc := range cases {
-		assertRuleFires(t, d, tc.body, tc.rule)
+		t.Run(tc.rule, func(t *testing.T) {
+			t.Parallel()
+			assertRuleFires(t, d, tc.body, tc.rule)
+		})
 	}
 }
 
 func TestCloudRound2Matches(t *testing.T) {
-	d := newDetector(t, Config{})
+	t.Parallel()
+	d := sharedDetector()
 	cases := []struct {
 		body string
 		rule string
@@ -149,12 +174,16 @@ func TestCloudRound2Matches(t *testing.T) {
 		{`EAAA` + repeat("a", 30), "Square Access Token"},
 	}
 	for _, tc := range cases {
-		assertRuleFires(t, d, tc.body, tc.rule)
+		t.Run(tc.rule, func(t *testing.T) {
+			t.Parallel()
+			assertRuleFires(t, d, tc.body, tc.rule)
+		})
 	}
 }
 
 func TestGitProviderMatches(t *testing.T) {
-	d := newDetector(t, Config{})
+	t.Parallel()
+	d := sharedDetector()
 	cases := []struct {
 		body string
 		rule string
@@ -169,12 +198,16 @@ func TestGitProviderMatches(t *testing.T) {
 		{`glsoat-` + repeat("a", 30), "GitLab SCIM Token"},
 	}
 	for _, tc := range cases {
-		assertRuleFires(t, d, tc.body, tc.rule)
+		t.Run(tc.rule, func(t *testing.T) {
+			t.Parallel()
+			assertRuleFires(t, d, tc.body, tc.rule)
+		})
 	}
 }
 
 func TestChatProviderMatches(t *testing.T) {
-	d := newDetector(t, Config{})
+	t.Parallel()
+	d := sharedDetector()
 	cases := []struct {
 		body string
 		rule string
@@ -184,12 +217,16 @@ func TestChatProviderMatches(t *testing.T) {
 		{`https://hooks.slack.com/services/T01234567/B01234567/` + repeat("a", 24), "Slack Webhook URL"},
 	}
 	for _, tc := range cases {
-		assertRuleFires(t, d, tc.body, tc.rule)
+		t.Run(tc.rule, func(t *testing.T) {
+			t.Parallel()
+			assertRuleFires(t, d, tc.body, tc.rule)
+		})
 	}
 }
 
 func TestCloudProviderMatches(t *testing.T) {
-	d := newDetector(t, Config{})
+	t.Parallel()
+	d := sharedDetector()
 	cases := []struct {
 		body string
 		rule string
@@ -208,6 +245,9 @@ func TestCloudProviderMatches(t *testing.T) {
 		{`nfp_` + repeat("a", 42), "Netlify Access Token"},
 	}
 	for _, tc := range cases {
-		assertRuleFires(t, d, tc.body, tc.rule)
+		t.Run(tc.rule, func(t *testing.T) {
+			t.Parallel()
+			assertRuleFires(t, d, tc.body, tc.rule)
+		})
 	}
 }

@@ -16,7 +16,8 @@ func charClass(c byte) int {
 }
 
 func TestGarblePreservesShape(t *testing.T) {
-	in := "sk-ant-api03-AbCd1234XyZ_woof"
+	t.Parallel()
+	in := "sk-ant-vfr89-XeLe4991FyC_nhnw"
 	out := Garble(in, 0)
 	if len(out) != len(in) {
 		t.Fatalf("length changed: %d -> %d", len(in), len(out))
@@ -33,6 +34,7 @@ func TestGarblePreservesShape(t *testing.T) {
 }
 
 func TestGarblePrefixKept(t *testing.T) {
+	t.Parallel()
 	in := "sk-ant-api03-SECRETVALUE1234567890"
 	const keep = 13 // "sk-ant-api03-"
 	out := Garble(in, keep)
@@ -42,6 +44,7 @@ func TestGarblePrefixKept(t *testing.T) {
 }
 
 func TestGarbleClampsPrefix(t *testing.T) {
+	t.Parallel()
 	if got := Garble("abc", 99); got != "abc" {
 		t.Fatalf("over-long keepPrefix should copy verbatim, got %q", got)
 	}
@@ -51,6 +54,7 @@ func TestGarbleClampsPrefix(t *testing.T) {
 }
 
 func TestGarbleRandomizes(t *testing.T) {
+	t.Parallel()
 	in := "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ"
 	a, b := Garble(in, 0), Garble(in, 0)
 	if a == b {
