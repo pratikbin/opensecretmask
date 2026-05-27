@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"time"
 )
 
@@ -61,6 +59,18 @@ func (s *Store) PutSecret(ctx context.Context, sec Secret) (int64, error) {
 		sec.Name, sec.Source, idx, ct, sec.Mask, sec.Shape, now, now).Scan(&id)
 	if err != nil {
 		return 0, err
+	}
+	// Update in-memory mask set so MaskExists skips DB for subsequent garble checks.
+	s.maskMu.Lock()
+	if s.maskSet != nil {
+		s.maskSet[sec.Mask] = struct{}{}
+	}
+	s.maskMu.Unlock()
+	// Invalidate registered-secrets cache when a user-registered secret is added.
+	if sec.Source == "registered" {
+		s.regMu.Lock()
+		s.regCache = nil
+		s.regMu.Unlock()
 	}
 	return id, nil
 }
@@ -159,6 +169,32 @@ func (s *Store) RegisteredSecrets(ctx context.Context) ([]Secret, error) {
 	if s.c == nil {
 		return nil, ErrLocked
 	}
+	s.regMu.RLock()
+	if s.regCache != nil {
+		out := make([]Secret, len(s.regCache))
+		copy(out, s.regCache)
+		s.regMu.RUnlock()
+		return out, nil
+	}
+	s.regMu.RUnlock()
+	s.regMu.Lock()
+	defer s.regMu.Unlock()
+	if s.regCache != nil {
+		out := make([]Secret, len(s.regCache))
+		copy(out, s.regCache)
+		return out, nil
+	}
+	loaded, err := s.loadRegisteredSecretsFromDB(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.regCache = loaded
+	out := make([]Secret, len(loaded))
+	copy(out, loaded)
+	return out, nil
+}
+
+func (s *Store) loadRegisteredSecretsFromDB(ctx context.Context) ([]Secret, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, name, source, orig_ct, mask, shape FROM secrets WHERE source = 'registered'`)
 	if err != nil {
@@ -185,13 +221,66 @@ func (s *Store) RegisteredSecrets(ctx context.Context) ([]Secret, error) {
 
 // MaskExists reports whether a secret with the given mask is already stored.
 func (s *Store) MaskExists(ctx context.Context, mask string) (bool, error) {
-	var one int
-	err := s.db.QueryRowContext(ctx, "SELECT 1 FROM secrets WHERE mask = ?", mask).Scan(&one)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+	s.maskMu.RLock()
+	if s.maskSet != nil {
+		_, ok := s.maskSet[mask]
+		s.maskMu.RUnlock()
+		return ok, nil
 	}
+	s.maskMu.RUnlock()
+	s.maskMu.Lock()
+	defer s.maskMu.Unlock()
+	if s.maskSet != nil {
+		_, ok := s.maskSet[mask]
+		return ok, nil
+	}
+	set, err := s.loadMaskSetFromDB(ctx)
 	if err != nil {
 		return false, err
 	}
-	return true, nil
+	s.maskSet = set
+	_, ok := set[mask]
+	return ok, nil
+}
+
+func (s *Store) loadMaskSetFromDB(ctx context.Context) (map[string]struct{}, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT mask FROM secrets")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	set := make(map[string]struct{})
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return nil, err
+		}
+		set[m] = struct{}{}
+	}
+	return set, rows.Err()
+}
+
+// TouchSecrets increments the hit counter and updates last_used for every id in ids.
+// It is a no-op when ids is empty.
+func (s *Store) TouchSecrets(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if len(ids) == 1 {
+		return s.TouchSecret(ctx, ids[0])
+	}
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, nowMS())
+	placeholders := make([]byte, 0, 2*len(ids)-1)
+	for i, id := range ids {
+		if i > 0 {
+			placeholders = append(placeholders, ',')
+		}
+		placeholders = append(placeholders, '?')
+		args = append(args, id)
+	}
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE secrets SET hits = hits + 1, last_used = ? WHERE id IN ("+string(placeholders)+")",
+		args...)
+	return err
 }
