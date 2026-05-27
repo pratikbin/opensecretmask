@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/pratikbin/opensecretmask/internal/crypto"
 
 	_ "modernc.org/sqlite"
@@ -35,6 +36,12 @@ type Store struct {
 	maskMu      sync.RWMutex
 	maskSet     map[string]struct{} // nil = not loaded; updated on writes
 	maskVersion int64
+
+	// bodyEncoder/bodyDecoder are single shared zstd codecs reused across all
+	// request-log inserts and reads. Both are safe for concurrent EncodeAll /
+	// DecodeAll use.
+	bodyEncoder *zstd.Encoder
+	bodyDecoder *zstd.Decoder
 }
 
 // Open opens (creating if needed) the SQLite database at path and applies the
@@ -66,7 +73,33 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		return nil, fmt.Errorf("store: schema: %w", err)
 	}
 	migrate(ctx, db)
-	return &Store{db: db}, nil
+	// One encoder and one decoder per Store; both are safe for concurrent
+	// EncodeAll / DecodeAll calls. SpeedFastest keeps CPU cost trivial against
+	// already-capped request bodies.
+	// https://pkg.go.dev/github.com/klauspost/compress/zstd
+	enc, err := zstd.NewWriter(nil,
+		zstd.WithEncoderLevel(zstd.SpeedFastest),
+		zstd.WithEncoderConcurrency(1),
+	)
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("store: zstd encoder: %w", err)
+	}
+	// WithDecoderMaxMemory caps single-frame decode memory; WithDecodeAllCapLimit
+	// applies the same ceiling to the DecodeAll path.
+	// https://pkg.go.dev/github.com/klauspost/compress/zstd#WithDecoderMaxMemory
+	// https://pkg.go.dev/github.com/klauspost/compress/zstd#WithDecodeAllCapLimit
+	dec, err := zstd.NewReader(nil,
+		zstd.WithDecoderConcurrency(1),
+		zstd.WithDecoderMaxMemory(maxLoggedBodyDecoded),
+		zstd.WithDecodeAllCapLimit(true),
+	)
+	if err != nil {
+		_ = enc.Close()
+		_ = db.Close()
+		return nil, fmt.Errorf("store: zstd decoder: %w", err)
+	}
+	return &Store{db: db, bodyEncoder: enc, bodyDecoder: dec}, nil
 }
 
 // migrate applies best-effort column additions for databases created before a
@@ -85,8 +118,19 @@ func migrate(ctx context.Context, db *sql.DB) {
 	}
 }
 
-// Close closes the underlying database.
-func (s *Store) Close() error { return s.db.Close() }
+// Close releases the zstd codecs and closes the underlying database.
+// (*zstd.Decoder).Close has no error return; encoder and DB errors are joined.
+func (s *Store) Close() error {
+	var encErr error
+	if s.bodyEncoder != nil {
+		encErr = s.bodyEncoder.Close()
+	}
+	if s.bodyDecoder != nil {
+		s.bodyDecoder.Close()
+	}
+	dbErr := s.db.Close()
+	return errors.Join(encErr, dbErr)
+}
 
 func (s *Store) getMeta(ctx context.Context, key string) ([]byte, error) {
 	var v []byte
