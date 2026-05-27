@@ -200,6 +200,11 @@ func watchDaemon(ctx context.Context, home string, p *pidInfo, osmKey string, op
 	addr := p.ProxyAddr
 	dash := p.DashAddr
 	var inflight atomic.Bool
+	// spawnWg drains any in-flight respawn goroutine before watchDaemon
+	// returns, so the caller's wg.Wait() in runCmd doesn't race a child
+	// goroutine still holding the daemon flock.
+	var spawnWg sync.WaitGroup
+	defer spawnWg.Wait()
 	t := time.NewTicker(watchdogInterval)
 	defer t.Stop()
 	for {
@@ -216,7 +221,16 @@ func watchDaemon(ctx context.Context, home string, p *pidInfo, osmKey string, op
 		if !inflight.CompareAndSwap(false, true) {
 			continue
 		}
-		go func() {
+		// Re-check ctx after winning the CAS — cancellation may have
+		// arrived while we were in readPidFile/daemonHealthy. Skipping the
+		// spawn here avoids fork-exec during shutdown.
+		select {
+		case <-ctx.Done():
+			inflight.Store(false)
+			return
+		default:
+		}
+		spawnWg.Go(func() {
 			defer inflight.Store(false)
 			fmt.Fprintf(os.Stderr, "osm: daemon died — respawning on %s\n", addr)
 			np, _, err := ensureDaemon(home, addr, dash, osmKey, opts)
@@ -225,7 +239,7 @@ func watchDaemon(ctx context.Context, home string, p *pidInfo, osmKey string, op
 				return
 			}
 			fmt.Fprintf(os.Stderr, "osm: daemon respawned pid=%d\n", np.PID)
-		}()
+		})
 	}
 }
 
