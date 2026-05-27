@@ -111,10 +111,12 @@ type Config struct {
 
 // Server is the CA-MITM masking proxy.
 type Server struct {
-	cfg   Config
-	proxy *goproxy.ProxyHttpServer
-	hosts map[string]hostRule // bare host -> interception rule
-	srv   *http.Server
+	cfg    Config
+	proxy  *goproxy.ProxyHttpServer
+	hosts  map[string]hostRule // bare host -> interception rule
+	srv    *http.Server
+	logSem chan struct{}  // bounded semaphore: max concurrent log goroutines
+	logWg  sync.WaitGroup // tracks in-flight log goroutines for drain on shutdown
 }
 
 // exchange carries per-request state from the request handler to the response
@@ -221,6 +223,7 @@ func NewServer(cfg Config) *Server {
 	proxy.OnResponse().DoFunc(s.onResponse)
 
 	s.proxy = proxy
+	s.logSem = make(chan struct{}, 32)
 	// WriteTimeout is left at 0: proxy responses include long-lived SSE
 	// streams that a short write deadline would sever.
 	s.srv = &http.Server{
@@ -256,7 +259,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.srv == nil {
 		return nil
 	}
-	return s.srv.Shutdown(ctx)
+	err := s.srv.Shutdown(ctx)
+	s.logWg.Wait() // drain in-flight log writes before store closes
+	return err
 }
 
 func (s *Server) onRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
@@ -330,6 +335,14 @@ func (s *Server) onResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Re
 			_ = resp.Body.Close()
 			if err != nil {
 				s.cfg.Logger.Error("read response body", "host", ex.host, "err", err)
+			} else if lr.N == 0 {
+				s.cfg.Logger.Error("response body exceeds limit, returning 502",
+					"host", ex.host, "limit", maxRequestBody)
+				resp.StatusCode = http.StatusBadGateway
+				resp.Body = io.NopCloser(bytes.NewReader(
+					[]byte("opensecretmask: response body too large")))
+				resp.ContentLength = -1
+				resp.Header.Del("Content-Length")
 			} else {
 				ex.respBody = capBody(body)
 				unmasked := s.cfg.Masker.UnmaskBody(body, ex.used)
@@ -364,11 +377,18 @@ func (s *Server) logExchange(ctx *goproxy.ProxyCtx, ex *exchange, status int, ss
 	if ctx.Error != nil {
 		rec.ErrMsg = ctx.Error.Error()
 	}
-	go func() {
-		if _, err := s.cfg.Store.LogRequest(context.Background(), rec, ids); err != nil {
-			s.cfg.Logger.Error("log request to store", "err", err)
-		}
-	}()
+	select {
+	case s.logSem <- struct{}{}:
+		s.logWg.Go(func() {
+			defer func() { <-s.logSem }()
+			if _, err := s.cfg.Store.LogRequest(context.Background(), rec, ids); err != nil {
+				s.cfg.Logger.Error("log request to store", "err", err)
+			}
+		})
+	default:
+		s.cfg.Logger.Warn("log queue full, dropping request log",
+			"host", ex.host, "path", ctx.Req.URL.Path)
+	}
 
 	attrs := make([]any, 0, 10)
 	attrs = append(attrs,
