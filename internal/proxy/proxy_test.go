@@ -1,6 +1,7 @@
 package proxy_test
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"io"
@@ -79,7 +80,8 @@ func newProxyHarness(t *testing.T, upstream http.Handler, paths ...string) *prox
 		UpstreamTLS: &tls.Config{RootCAs: upstreamPool, MinVersion: tls.VersionTLS12},
 	})
 	proxySrv := httptest.NewServer(srv.Handler())
-	t.Cleanup(proxySrv.Close)
+	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) }) // runs LAST: drain logs after server closed
+	t.Cleanup(proxySrv.Close)                                    // runs FIRST: stop accepting requests
 
 	caPool := x509.NewCertPool()
 	if !caPool.AppendCertsFromPEM(ca.CertPEM()) {
@@ -234,7 +236,8 @@ func TestProxyTunnelsNonLLMHostUntouched(t *testing.T) {
 		Store:     st,
 	})
 	proxySrv := httptest.NewServer(srv.Handler())
-	t.Cleanup(proxySrv.Close)
+	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) }) // runs LAST: drain logs after server closed
+	t.Cleanup(proxySrv.Close)                                    // runs FIRST: stop accepting requests
 
 	proxyURL, _ := url.Parse(proxySrv.URL)
 	upPool := x509.NewCertPool()

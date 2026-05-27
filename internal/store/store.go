@@ -29,10 +29,12 @@ type Store struct {
 	db *sql.DB
 	c  *crypto.Cipher
 
-	regMu    sync.RWMutex
-	regCache []Secret // nil = not loaded; invalidated on writes
-	maskMu   sync.RWMutex
-	maskSet  map[string]struct{} // nil = not loaded; updated on writes
+	regMu       sync.RWMutex
+	regCache    []Secret // nil = not loaded; invalidated on writes
+	regVersion  int64
+	maskMu      sync.RWMutex
+	maskSet     map[string]struct{} // nil = not loaded; updated on writes
+	maskVersion int64
 }
 
 // Open opens (creating if needed) the SQLite database at path and applies the
@@ -172,3 +174,24 @@ func (s *Store) Unlock(ctx context.Context, passphrase string) error {
 
 // Unlocked reports whether the store has a usable cipher.
 func (s *Store) Unlocked() bool { return s.c != nil }
+
+// readVersion returns the current secrets_version from meta. Returns 0 when
+// the key has never been written (fresh database).
+func (s *Store) readVersion(ctx context.Context) (int64, error) {
+	var v int64
+	err := s.db.QueryRowContext(ctx,
+		"SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'secrets_version'").Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return v, err
+}
+
+// bumpVersion atomically increments secrets_version. Called on every write so
+// any other Store instance can detect the change on next cache check.
+func (s *Store) bumpVersion(ctx context.Context) {
+	// Best-effort: a failure here causes one extra cache reload, not a correctness bug.
+	_, _ = s.db.ExecContext(ctx,
+		"INSERT INTO meta(key, value) VALUES('secrets_version', 1) "+
+			"ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1")
+}

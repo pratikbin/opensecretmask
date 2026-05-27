@@ -51,19 +51,22 @@ func (s *Store) PutSecret(ctx context.Context, sec Secret) (int64, error) {
 	// duplicate into the existing row; the no-op DO UPDATE makes RETURNING
 	// yield its id on the conflict path too.
 	var id int64
+	var storedMask string
 	err = s.db.QueryRowContext(ctx,
 		`INSERT INTO secrets(name, source, orig_index, orig_ct, mask, shape, created_at, last_used, hits)
 		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, 0)
 		 ON CONFLICT(orig_index) DO UPDATE SET orig_index = orig_index
-		 RETURNING id`,
-		sec.Name, sec.Source, idx, ct, sec.Mask, sec.Shape, now, now).Scan(&id)
+		 RETURNING id, mask`,
+		sec.Name, sec.Source, idx, ct, sec.Mask, sec.Shape, now, now).Scan(&id, &storedMask)
 	if err != nil {
 		return 0, err
 	}
+	s.bumpVersion(ctx)
 	// Update in-memory mask set so MaskExists skips DB for subsequent garble checks.
+	// Use storedMask (not sec.Mask) so ON CONFLICT paths record the existing row's mask.
 	s.maskMu.Lock()
 	if s.maskSet != nil {
-		s.maskSet[sec.Mask] = struct{}{}
+		s.maskSet[storedMask] = struct{}{}
 	}
 	s.maskMu.Unlock()
 	// Invalidate registered-secrets cache when a user-registered secret is added.
@@ -169,17 +172,27 @@ func (s *Store) RegisteredSecrets(ctx context.Context) ([]Secret, error) {
 	if s.c == nil {
 		return nil, ErrLocked
 	}
+	dbVer, err := s.readVersion(ctx)
+	if err != nil {
+		return nil, err
+	}
 	s.regMu.RLock()
-	if s.regCache != nil {
+	if s.regCache != nil && s.regVersion == dbVer {
 		out := make([]Secret, len(s.regCache))
 		copy(out, s.regCache)
 		s.regMu.RUnlock()
 		return out, nil
 	}
 	s.regMu.RUnlock()
+
 	s.regMu.Lock()
 	defer s.regMu.Unlock()
-	if s.regCache != nil {
+	// Re-read version under write lock: another goroutine may have just reloaded.
+	dbVer2, err := s.readVersion(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if s.regCache != nil && s.regVersion == dbVer2 {
 		out := make([]Secret, len(s.regCache))
 		copy(out, s.regCache)
 		return out, nil
@@ -189,6 +202,7 @@ func (s *Store) RegisteredSecrets(ctx context.Context) ([]Secret, error) {
 		return nil, err
 	}
 	s.regCache = loaded
+	s.regVersion = dbVer2
 	out := make([]Secret, len(loaded))
 	copy(out, loaded)
 	return out, nil
@@ -221,16 +235,25 @@ func (s *Store) loadRegisteredSecretsFromDB(ctx context.Context) ([]Secret, erro
 
 // MaskExists reports whether a secret with the given mask is already stored.
 func (s *Store) MaskExists(ctx context.Context, mask string) (bool, error) {
+	dbVer, err := s.readVersion(ctx)
+	if err != nil {
+		return false, err
+	}
 	s.maskMu.RLock()
-	if s.maskSet != nil {
+	if s.maskSet != nil && s.maskVersion == dbVer {
 		_, ok := s.maskSet[mask]
 		s.maskMu.RUnlock()
 		return ok, nil
 	}
 	s.maskMu.RUnlock()
+
 	s.maskMu.Lock()
 	defer s.maskMu.Unlock()
-	if s.maskSet != nil {
+	dbVer2, err := s.readVersion(ctx)
+	if err != nil {
+		return false, err
+	}
+	if s.maskSet != nil && s.maskVersion == dbVer2 {
 		_, ok := s.maskSet[mask]
 		return ok, nil
 	}
@@ -239,6 +262,7 @@ func (s *Store) MaskExists(ctx context.Context, mask string) (bool, error) {
 		return false, err
 	}
 	s.maskSet = set
+	s.maskVersion = dbVer2
 	_, ok := set[mask]
 	return ok, nil
 }
