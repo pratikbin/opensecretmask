@@ -133,12 +133,17 @@ type exchange struct {
 // request log from bloating on long conversations.
 const maxStoredBody = 256 << 10
 
+// maxRequestBody caps the request and response bodies read into memory.
+// LLM payloads can carry multiple PDFs and images; 512 MiB accommodates
+// them while preventing OOM from adversarially large bodies.
+const maxRequestBody = 512 << 20 // 512 MiB
+
 // capBody truncates b to maxStoredBody for storage.
 func capBody(b []byte) []byte {
-	if len(b) <= maxStoredBody {
-		return b
+	if len(b) > maxStoredBody {
+		b = b[:maxStoredBody]
 	}
-	return b[:maxStoredBody]
+	return bytes.Clone(b)
 }
 
 // compilePaths turns a provider's path patterns into compiled regexps. An
@@ -186,9 +191,15 @@ func NewServer(cfg Config) *Server {
 	// Connect directly to upstreams. The client points HTTPS_PROXY at us, so
 	// an env-derived proxy would route our own upstream calls back into us.
 	proxy.Tr = &http.Transport{
-		Proxy:              nil,
-		DisableCompression: true, // plaintext bodies for masking
-		TLSClientConfig:    upstreamTLSConfig(cfg),
+		Proxy:                 nil,
+		DisableCompression:    true, // plaintext bodies for masking
+		TLSClientConfig:       upstreamTLSConfig(cfg),
+		MaxIdleConns:          200,
+		MaxIdleConnsPerHost:   100,
+		IdleConnTimeout:       600 * time.Second,
+		ResponseHeaderTimeout: 600 * time.Second,
+		TLSHandshakeTimeout:   30 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
 	}
 	proxy.ConnectDial = nil
 	proxy.ConnectDialWithReq = nil
@@ -267,12 +278,18 @@ func (s *Server) onRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Requ
 	if req.Body == nil || req.Body == http.NoBody {
 		return req, nil
 	}
-	body, err := io.ReadAll(req.Body)
+	lr := &io.LimitedReader{R: req.Body, N: maxRequestBody + 1}
+	body, err := io.ReadAll(lr)
 	_ = req.Body.Close()
 	if err != nil {
 		s.cfg.Logger.Error("read request body", "host", host, "err", err)
 		return req, goproxy.NewResponse(req, goproxy.ContentTypeText,
 			http.StatusBadGateway, "opensecretmask: could not read request body")
+	}
+	if lr.N == 0 {
+		s.cfg.Logger.Error("request body exceeds limit", "host", host, "limit", maxRequestBody)
+		return req, goproxy.NewResponse(req, goproxy.ContentTypeText,
+			http.StatusRequestEntityTooLarge, "opensecretmask: request body too large")
 	}
 	masked, used, err := s.cfg.Masker.MaskBody(req.Context(), body)
 	if err != nil {
@@ -308,7 +325,8 @@ func (s *Server) onResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Re
 		if sse {
 			resp.Body = mask.NewUnmaskReader(resp.Body, ex.used)
 		} else {
-			body, err := io.ReadAll(resp.Body)
+			lr := &io.LimitedReader{R: resp.Body, N: maxRequestBody + 1}
+			body, err := io.ReadAll(lr)
 			_ = resp.Body.Close()
 			if err != nil {
 				s.cfg.Logger.Error("read response body", "host", ex.host, "err", err)
@@ -346,11 +364,14 @@ func (s *Server) logExchange(ctx *goproxy.ProxyCtx, ex *exchange, status int, ss
 	if ctx.Error != nil {
 		rec.ErrMsg = ctx.Error.Error()
 	}
-	if _, err := s.cfg.Store.LogRequest(ctx.Req.Context(), rec, ids); err != nil {
-		s.cfg.Logger.Error("log request to store", "err", err)
-	}
+	go func() {
+		if _, err := s.cfg.Store.LogRequest(context.Background(), rec, ids); err != nil {
+			s.cfg.Logger.Error("log request to store", "err", err)
+		}
+	}()
 
-	attrs := []any{
+	attrs := make([]any, 0, 10)
+	attrs = append(attrs,
 		"host", ex.host,
 		"dialect", ex.dialect,
 		"method", ctx.Req.Method,
@@ -359,7 +380,7 @@ func (s *Server) logExchange(ctx *goproxy.ProxyCtx, ex *exchange, status int, ss
 		"masked", len(ex.used),
 		"sse", sse,
 		"dur", dur.Round(time.Millisecond).String(),
-	}
+	)
 	if ctx.Error != nil {
 		s.cfg.Logger.Error("request failed", append(attrs, "err", ctx.Error)...)
 	} else {
@@ -379,7 +400,7 @@ func (s *Server) tunnelConnect(req *http.Request, client net.Conn, _ *goproxy.Pr
 	if _, _, err := net.SplitHostPort(target); err != nil {
 		target = net.JoinHostPort(target, "443")
 	}
-	upstream, err := net.DialTimeout("tcp", target, 30*time.Second)
+	upstream, err := (&net.Dialer{Timeout: 30 * time.Second}).DialContext(req.Context(), "tcp", target)
 	if err != nil {
 		s.cfg.Logger.Error("connect tunnel dial", "host", target, "err", err)
 		_, _ = io.WriteString(client, "HTTP/1.1 502 Bad Gateway\r\n\r\n")

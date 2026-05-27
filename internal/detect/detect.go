@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/sourcegraph/conc/pool"
 )
@@ -19,6 +20,8 @@ import (
 // scheduling cost outweighs the regex work, so Scan stays on the
 // sequential path.
 const parallelScanMinBody = 4096
+
+var findingMapPool = sync.Pool{New: func() any { return make(map[string]Finding) }}
 
 // Finding is one detected secret.
 type Finding struct {
@@ -95,7 +98,11 @@ func (d *Detector) RuleCount() int { return len(d.rules) }
 // Regex rules always run; the entropy heuristic runs only when enabled
 // in Config.
 func (d *Detector) Scan(body []byte) []Finding {
-	seen := make(map[string]Finding, len(d.rules))
+	seen := findingMapPool.Get().(map[string]Finding)
+	defer func() {
+		clear(seen)
+		findingMapPool.Put(seen)
+	}()
 
 	applyRule := func(r compiledRule) []Finding {
 		if len(r.prefixBytes) > 0 && !bytes.Contains(body, r.prefixBytes) {
