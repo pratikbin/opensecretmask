@@ -34,7 +34,11 @@ CREATE TABLE IF NOT EXISTS requests (
 	duration_ms INTEGER NOT NULL DEFAULT 0,
 	err         TEXT    NOT NULL DEFAULT '',
 	req_body    BLOB    NOT NULL DEFAULT x'',
-	resp_body   BLOB    NOT NULL DEFAULT x''
+	resp_body   BLOB    NOT NULL DEFAULT x'',
+	req_body_codec    TEXT    NOT NULL DEFAULT '',
+	resp_body_codec   TEXT    NOT NULL DEFAULT '',
+	req_body_raw_len  INTEGER NOT NULL DEFAULT 0,
+	resp_body_raw_len INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_requests_ts ON requests(ts);
 
