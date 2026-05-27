@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -39,6 +40,8 @@ func (s *Store) LogRequest(ctx context.Context, r RequestRecord, secretIDs []int
 	if respBody == nil {
 		respBody = []byte{}
 	}
+	encReq := s.encodeLoggedBody(reqBody)
+	encResp := s.encodeLoggedBody(respBody)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -46,9 +49,10 @@ func (s *Store) LogRequest(ctx context.Context, r RequestRecord, secretIDs []int
 	defer func() { _ = tx.Rollback() }() // no-op once Commit succeeds
 
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO requests(ts, provider, host, method, path, status, sse, masked, duration_ms, err, req_body, resp_body)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		nowMS(), r.Provider, r.Host, r.Method, r.Path, r.Status, sse, r.Masked, r.DurationMS, r.ErrMsg, reqBody, respBody)
+		`INSERT INTO requests(ts, provider, host, method, path, status, sse, masked, duration_ms, err, req_body, resp_body, req_body_codec, resp_body_codec, req_body_raw_len, resp_body_raw_len)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		nowMS(), r.Provider, r.Host, r.Method, r.Path, r.Status, sse, r.Masked, r.DurationMS, r.ErrMsg,
+		encReq.data, encResp.data, encReq.codec, encResp.codec, encReq.rawLen, encResp.rawLen)
 	if err != nil {
 		return 0, err
 	}
@@ -84,13 +88,27 @@ func (s *Store) GetRequest(ctx context.Context, id int64) (*RequestDetail, error
 	var d RequestDetail
 	var ts int64
 	var sse int
+	var rawReqBody, rawRespBody []byte
+	var reqCodec, respCodec string
+	var reqRawLen, respRawLen int64
 	if err := s.db.QueryRowContext(ctx,
-		`SELECT id, ts, provider, host, method, path, status, sse, masked, duration_ms, err, req_body, resp_body
+		`SELECT id, ts, provider, host, method, path, status, sse, masked, duration_ms, err, req_body, resp_body, req_body_codec, resp_body_codec, req_body_raw_len, resp_body_raw_len
 		 FROM requests WHERE id = ?`, id).
 		Scan(&d.ID, &ts, &d.Provider, &d.Host, &d.Method, &d.Path,
-			&d.Status, &sse, &d.Masked, &d.DurationMS, &d.ErrMsg, &d.ReqBody, &d.RespBody); err != nil {
+			&d.Status, &sse, &d.Masked, &d.DurationMS, &d.ErrMsg, &rawReqBody, &rawRespBody,
+			&reqCodec, &respCodec, &reqRawLen, &respRawLen); err != nil {
 		return nil, err
 	}
+	reqBody, err := s.decodeLoggedBody(rawReqBody, reqCodec, reqRawLen)
+	if err != nil {
+		return nil, fmt.Errorf("store: decode request body: %w", err)
+	}
+	respBody, err := s.decodeLoggedBody(rawRespBody, respCodec, respRawLen)
+	if err != nil {
+		return nil, fmt.Errorf("store: decode response body: %w", err)
+	}
+	d.ReqBody = reqBody
+	d.RespBody = respBody
 	d.Time = time.UnixMilli(ts)
 	d.SSE = sse != 0
 	secs, err := s.requestSecrets(ctx, id)
