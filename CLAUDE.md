@@ -44,6 +44,33 @@ the responses. Real credentials never reach the provider.
   gitleaks-style anchors — prefix-distinctive regexes only, so detection
   stays stateless across JSON bodies, headers, and bare tokens.
 
+## Performance design
+
+Key constants and decisions (sized for LLM workloads with multi-PDF/image payloads):
+
+- `proxy.maxRequestBody = 512 MiB` — cap for `io.LimitReader` on request and response
+  bodies. Prevents OOM from adversarially large inputs while accommodating real
+  multi-PDF + image payloads. Bodies exceeding the limit return HTTP 413 (requests)
+  or are silently capped (responses stored for dashboard only).
+- `proxy.maxStoredBody = 256 KiB` — per-request body stored in the dashboard log.
+  Always `bytes.Clone`d from the read buffer so the multi-MB read buffer is freed.
+- `Transport.MaxIdleConns = 200 / MaxIdleConnsPerHost = 100` — connection pool sized
+  for concurrent LLM requests; `ResponseHeaderTimeout = 600 s` accommodates long
+  chain-of-thought and agentic loops.
+- `store.RegisteredSecrets` cache — decrypted secret list held in `sync.RWMutex`-guarded
+  `Store.regCache`; populated lazily on first call, invalidated on `PutSecret` (registered)
+  and `Unlock`. Eliminates per-request DB scan + AES decrypt.
+- `store.MaskExists` in-memory set — `Store.maskSet map[string]struct{}` loaded lazily,
+  updated on every `PutSecret`. Eliminates up to 8 DB round-trips per novel secret's
+  garble-retry loop.
+- `store.TouchSecrets` batch — collects all secret IDs used in one request and issues a
+  single `UPDATE … WHERE id IN (…)` instead of N serial writes.
+- `detect.findingMapPool` — `sync.Pool` for the per-`Scan` dedup map; `clear` + `Put` on
+  exit avoids per-call allocations for the 87-rule map.
+- `mask.usedMapPool` — `sync.Pool` for the `map[int64]store.Secret` used in `MaskBody`.
+- `logExchange` DB write is async (goroutine + `context.Background()`) so SQLite latency
+  does not add to client-perceived response time.
+
 ## Future TODO
 
 - **Partial-mask leak in response stream.** Unmasker swaps complete mask

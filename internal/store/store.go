@@ -7,6 +7,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/pratikbin/opensecretmask/internal/crypto"
 
@@ -26,6 +28,11 @@ var ErrWrongPassphrase = errors.New("store: wrong passphrase")
 type Store struct {
 	db *sql.DB
 	c  *crypto.Cipher
+
+	regMu    sync.RWMutex
+	regCache []Secret // nil = not loaded; invalidated on writes
+	maskMu   sync.RWMutex
+	maskSet  map[string]struct{} // nil = not loaded; updated on writes
 }
 
 // Open opens (creating if needed) the SQLite database at path and applies the
@@ -45,6 +52,9 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	// connection serializes all access, trading read parallelism for the
 	// elimination of SQLITE_BUSY contention — fine for a local single-user tool.
 	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(1 * time.Hour)
+	db.SetConnMaxIdleTime(10 * time.Minute)
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
@@ -151,6 +161,12 @@ func (s *Store) Unlock(ctx context.Context, passphrase string) error {
 		return ErrWrongPassphrase
 	}
 	s.c = c
+	s.regMu.Lock()
+	s.regCache = nil
+	s.regMu.Unlock()
+	s.maskMu.Lock()
+	s.maskSet = nil
+	s.maskMu.Unlock()
 	return nil
 }
 

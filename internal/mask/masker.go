@@ -17,6 +17,7 @@ import (
 )
 
 var marshalBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+var usedMapPool = sync.Pool{New: func() any { return make(map[int64]store.Secret) }}
 
 const maxGarbleRetries = 8
 
@@ -67,9 +68,17 @@ func (m *Masker) MaskBody(ctx context.Context, body []byte) ([]byte, []store.Sec
 	}
 	doc, err := decodeJSON(body)
 	if err != nil {
-		return m.maskBytes(ctx, body, regB) // not JSON — fall back to whole-body masking
+		out, secs, err := m.maskBytes(ctx, body, regB) // not JSON — fall back to whole-body masking
+		if err == nil {
+			m.touchAll(ctx, secs)
+		}
+		return out, secs, err
 	}
-	used := make(map[int64]store.Secret)
+	used := usedMapPool.Get().(map[int64]store.Secret)
+	defer func() {
+		clear(used)
+		usedMapPool.Put(used)
+	}()
 	masked, err := m.maskJSONValue(ctx, doc, used, regB)
 	if err != nil {
 		return nil, nil, err
@@ -81,7 +90,20 @@ func (m *Masker) MaskBody(ctx context.Context, body []byte) ([]byte, []store.Sec
 	if err != nil {
 		return nil, nil, err
 	}
-	return out, sortedSecrets(used), nil
+	secs := sortedSecrets(used)
+	m.touchAll(ctx, secs)
+	return out, secs, nil
+}
+
+func (m *Masker) touchAll(ctx context.Context, secs []store.Secret) {
+	if len(secs) == 0 {
+		return
+	}
+	ids := make([]int64, len(secs))
+	for i, s := range secs {
+		ids[i] = s.ID
+	}
+	_ = m.store.TouchSecrets(ctx, ids)
 }
 
 // maskBytes detects every secret in body and replaces it with its mask. It is
@@ -124,7 +146,6 @@ func (m *Masker) maskBytes(ctx context.Context, body []byte, reg []regSecret) ([
 	out := body
 	for _, s := range used {
 		out = bytes.ReplaceAll(out, []byte(s.Original), []byte(s.Mask))
-		_ = m.store.TouchSecret(ctx, s.ID)
 	}
 	return out, used, nil
 }
@@ -367,6 +388,7 @@ func marshalJSON(v any) ([]byte, error) {
 	enc := json.NewEncoder(buf)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(v); err != nil {
+		buf.Reset()
 		marshalBufPool.Put(buf)
 		return nil, err
 	}
