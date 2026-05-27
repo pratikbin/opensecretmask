@@ -76,6 +76,10 @@ func migrate(ctx context.Context, db *sql.DB) {
 	for _, stmt := range []string{
 		`ALTER TABLE requests ADD COLUMN req_body BLOB NOT NULL DEFAULT x''`,
 		`ALTER TABLE requests ADD COLUMN resp_body BLOB NOT NULL DEFAULT x''`,
+		`ALTER TABLE requests ADD COLUMN req_body_codec TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE requests ADD COLUMN resp_body_codec TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE requests ADD COLUMN req_body_raw_len INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE requests ADD COLUMN resp_body_raw_len INTEGER NOT NULL DEFAULT 0`,
 	} {
 		_, _ = db.ExecContext(ctx, stmt)
 	}
