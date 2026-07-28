@@ -25,6 +25,29 @@ var cloudRules = []Rule{
 	{"Shopify Custom Access Token", "critical", regexp.MustCompile(`shpca_[a-fA-F0-9]{32}`), 0},
 	{"Shopify Private App Access Token", "critical", regexp.MustCompile(`shppa_[a-fA-F0-9]{32}`), 0},
 	{"Square Access Token", "critical", regexp.MustCompile(`(?:EAAA|sq0atp-)[A-Za-z0-9_\-]{22,60}`), 0},
+	// Round-3 (gitleaks): additional cloud/hosting, IaC, infra and
+	// observability credentials. DigitalOcean OAuth access/refresh tokens
+	// are distinct from the dop_v1_ personal token in builtinRules; the
+	// New Relic insert key is distinct from the NRAK- user key there.
+	{"DigitalOcean OAuth Access Token", "critical", regexp.MustCompile(`doo_v1_[a-f0-9]{64}`), 0},
+	{"DigitalOcean OAuth Refresh Token", "critical", regexp.MustCompile(`dor_v1_[a-f0-9]{64}`), 0},
+	{"HashiCorp Vault Batch Token", "critical", regexp.MustCompile(`hvb\.[\w-]{138,300}`), 0},
+	{"New Relic Insights Insert Key", "critical", regexp.MustCompile(`NRII-[a-zA-Z0-9\-]{32}`), 0},
+	{"Pulumi API Token", "critical", regexp.MustCompile(`pul-[a-f0-9]{40}`), 0},
+	{"OpenShift User Token", "critical", regexp.MustCompile(`sha256~[\w-]{43}`), 0},
+	{"Shopify Shared Secret", "critical", regexp.MustCompile(`shpss_[a-fA-F0-9]{32}`), 0},
+	{"Scalingo API Token", "critical", regexp.MustCompile(`tk-us-[\w-]{48}`), 0},
+	{"Defined Networking API Token", "critical", regexp.MustCompile(`dnkey-[a-z0-9=_\-]{26}-[a-z0-9=_\-]{52}`), 0},
+	// Round-4 (trufflehog catalog): cloud/hosting, observability and
+	// platform credentials. FLWSECK- is the live secret-key variant of the
+	// FLWSECK_TEST- test key above; sq0idp- is the Square OAuth secret,
+	// distinct from the EAAA/sq0atp- access token.
+	{"Rootly API Token", "critical", regexp.MustCompile(`rootly_[0-9a-f]{64}`), 0},
+	{"SaladCloud API Key", "critical", regexp.MustCompile(`salad_cloud_[0-9A-Za-z]{1,7}_[0-9A-Za-z]{7,235}`), 0},
+	{"Supabase Personal Access Token", "critical", regexp.MustCompile(`sbp_[0-9a-z]{40}`), 0},
+	{"Square OAuth Secret", "critical", regexp.MustCompile(`sq0idp-[0-9A-Za-z]{22}`), 0},
+	{"Flutterwave Live Secret Key", "critical", regexp.MustCompile(`FLWSECK-[0-9a-z]{32}-X`), 0},
+	{"Artifactory Reference Token", "critical", regexp.MustCompile(`cmVmdGtu[0-9A-Za-z]{56}`), 0},
 }
 
 type cloudProvider struct{}

@@ -224,6 +224,50 @@ func TestChatProviderMatches(t *testing.T) {
 	}
 }
 
+// TestRound3Matches covers the round-3 gitleaks-derived rules spanning
+// the llm, cloud, git and devtools providers. Each literal uses 'a'
+// filler, valid across every charset (hex, base64url, alnum).
+func TestRound3Matches(t *testing.T) {
+	t.Parallel()
+	d := sharedDetector()
+	cases := []struct {
+		body string
+		rule string
+	}{
+		{`api_org_` + repeat("a", 34), "Hugging Face Organization API Token"},
+		{`doo_v1_` + repeat("a", 64), "DigitalOcean OAuth Access Token"},
+		{`dor_v1_` + repeat("a", 64), "DigitalOcean OAuth Refresh Token"},
+		{`hvb.` + repeat("a", 138), "HashiCorp Vault Batch Token"},
+		{`NRII-` + repeat("a", 32), "New Relic Insights Insert Key"},
+		{`pul-` + repeat("a", 40), "Pulumi API Token"},
+		{`sha256~` + repeat("a", 43), "OpenShift User Token"},
+		{`shpss_` + repeat("a", 32), "Shopify Shared Secret"},
+		{`tk-us-` + repeat("a", 48), "Scalingo API Token"},
+		{`dnkey-` + repeat("a", 26) + `-` + repeat("a", 52), "Defined Networking API Token"},
+		{`gloas-` + repeat("a", 64), "GitLab OIDC Application Secret"},
+		{`glrt-` + repeat("a", 20), "GitLab Runner Authentication Token"},
+		{`Cookie: _gitlab_session=` + repeat("a", 32), "GitLab Session Cookie"},
+		{`p8e-` + repeat("a", 32), "Adobe Client Secret"},
+		{`CLOJARS_` + repeat("a", 60), "Clojars API Token"},
+		{`duffel_live_` + repeat("a", 43), "Duffel API Token"},
+		{`fio-u-` + repeat("a", 64), "Frame.io API Token"},
+		{`s-s4t2ud-` + repeat("a", 64), "Intra42 Client Secret"},
+		{`rdme_` + repeat("a", 70), "Readme API Token"},
+		{`rubygems_` + repeat("a", 48), "RubyGems API Token"},
+		{`sntryu_` + repeat("a", 64), "Sentry User Token"},
+		{`shippo_live_` + repeat("a", 40), "Shippo API Token"},
+		{`sm_aat_` + repeat("a", 16), "SettleMint Application Access Token"},
+		{`sm_pat_` + repeat("a", 16), "SettleMint Personal Access Token"},
+		{`sm_sat_` + repeat("a", 16), "SettleMint Service Access Token"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.rule, func(t *testing.T) {
+			t.Parallel()
+			assertRuleFires(t, d, tc.body, tc.rule)
+		})
+	}
+}
+
 func TestCloudProviderMatches(t *testing.T) {
 	t.Parallel()
 	d := sharedDetector()
@@ -243,6 +287,51 @@ func TestCloudProviderMatches(t *testing.T) {
 		{`HRKU-AA` + repeat("a", 25), "Heroku API Key v2"},
 		{`dckr_pat_` + repeat("a", 30), "Docker PAT"},
 		{`nfp_` + repeat("a", 42), "Netlify Access Token"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.rule, func(t *testing.T) {
+			t.Parallel()
+			assertRuleFires(t, d, tc.body, tc.rule)
+		})
+	}
+}
+
+// TestRound4Matches covers the round-4 rules derived from the trufflehog
+// detector catalog and the local ~/workspace scan (OpenAI legacy, DeepSeek,
+// Copperx and FC were observed live on disk).
+func TestRound4Matches(t *testing.T) {
+	t.Parallel()
+	d := sharedDetector()
+	cases := []struct {
+		body string
+		rule string
+	}{
+		{`lsv2_pt_` + repeat("a", 32) + `_` + repeat("a", 10), "LangSmith API Key"},
+		{`nvapi-` + repeat("a", 64), "NVIDIA API Key"},
+		{`sk-` + repeat("a", 20) + `T3BlbkFJ` + repeat("a", 20), "OpenAI API Key (legacy)"},
+		{`rootly_` + repeat("a", 64), "Rootly API Token"},
+		{`salad_cloud_` + repeat("a", 4) + `_` + repeat("a", 20), "SaladCloud API Key"},
+		{`sbp_` + repeat("a", 40), "Supabase Personal Access Token"},
+		{`sq0idp-` + repeat("a", 22), "Square OAuth Secret"},
+		{`FLWSECK-` + repeat("a", 32) + `-X`, "Flutterwave Live Secret Key"},
+		{`cmVmdGtu` + repeat("a", 56), "Artifactory Reference Token"},
+		{`CCIPAT_` + repeat("a", 22) + `_` + repeat("a", 40), "CircleCI Personal Access Token"},
+		{`CFPAT-` + repeat("a", 43), "Contentful Personal Access Token"},
+		{`bkua_` + repeat("a", 40), "Buildkite User Access Token"},
+		{`endr+` + repeat("a", 16), "Endor Labs API Key"},
+		{`slk_` + repeat("a", 64), "Sourcegraph Cody Access Token"},
+		{`shltm_` + repeat("a", 40), "Flexport API Token"},
+		{`phx_` + repeat("a", 43), "PostHog Personal API Key"},
+		{`BBFF-` + repeat("a", 30), "Ubidots Token"},
+		{`pav1_` + repeat("a", 64), "Copperx API Key"},
+		{`rh-api-` + repeat("a", 8) + `-` + repeat("a", 4) + `-` + repeat("a", 4) + `-` + repeat("a", 4) + `-` + repeat("a", 12), "Robinhood Crypto API Key"},
+		{`ramp_sec_` + repeat("a", 48), "Ramp API Secret"},
+		{`3MVG9` + repeat("a", 80), "Salesforce OAuth Token"},
+		{`5AEP861` + repeat("a", 80), "Salesforce Refresh Token"},
+		{`flb_live_` + repeat("a", 20), "Fleetbase API Key"},
+		{`u-s4t2ud-` + repeat("a", 64), "Intra42 User Token"},
+		{`pat-na1-` + repeat("a", 8) + `-` + repeat("a", 4) + `-` + repeat("a", 4) + `-` + repeat("a", 4) + `-` + repeat("a", 12), "HubSpot Private App Token"},
+		{`skp_` + repeat("a", 32), "FC API Key"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.rule, func(t *testing.T) {
