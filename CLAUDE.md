@@ -66,7 +66,7 @@ Key constants and decisions (sized for LLM workloads with multi-PDF/image payloa
 - `store.TouchSecrets` batch — collects all secret IDs used in one request and issues a
   single `UPDATE … WHERE id IN (…)` instead of N serial writes.
 - `detect.findingMapPool` — `sync.Pool` for the per-`Scan` dedup map; `clear` + `Put` on
-  exit avoids per-call allocations for the 87-rule map.
+  exit avoids per-call allocations for the 139-rule map.
 - `mask.usedMapPool` — `sync.Pool` for the `map[int64]store.Secret` used in `MaskBody`.
 - `logExchange` DB write is async (goroutine + `context.Background()`) so SQLite latency
   does not add to client-perceived response time.

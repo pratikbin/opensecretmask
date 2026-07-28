@@ -14,6 +14,12 @@ var gitRules = []Rule{
 	{"GitLab CI/CD Job Token", "critical", regexp.MustCompile(`glcbt-[0-9a-zA-Z_\-]{20,}`), 0},
 	{"GitLab Deploy Token", "critical", regexp.MustCompile(`gldt-[0-9a-zA-Z_\-]{20}`), 0},
 	{"GitLab SCIM Token", "critical", regexp.MustCompile(`glsoat-[0-9a-zA-Z_\-]{20,}`), 0},
+	// Round-3 (gitleaks): OIDC application secret, runner authentication
+	// token (GitLab 16.0+), and the session cookie value (group 1 keeps
+	// the cookie name out of the mask).
+	{"GitLab OIDC Application Secret", "critical", regexp.MustCompile(`gloas-[0-9a-zA-Z_\-]{64}`), 0},
+	{"GitLab Runner Authentication Token", "critical", regexp.MustCompile(`glrt-[0-9a-zA-Z_\-]{20}`), 0},
+	{"GitLab Session Cookie", "high", regexp.MustCompile(`_gitlab_session=([0-9a-z]{32})`), 1},
 }
 
 type gitProvider struct{}
