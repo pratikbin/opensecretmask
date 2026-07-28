@@ -19,5 +19,7 @@ internal/dashboard/bun.lock
 ONBOARDING.md
 docs/*
 !docs/THREAT_MODEL.md
+!docs/architecture-review/
+!docs/architecture-review/*.md
 .claude
 skills-lock.json
