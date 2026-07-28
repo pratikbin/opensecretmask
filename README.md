@@ -1,14 +1,17 @@
 # opensecretmask
 
-`osm` is a local CA-MITM proxy that keeps secrets out of LLM API traffic.
+`osm` is a local CA-MITM proxy that replaces matched, mask-eligible payload
+secrets in intercepted, in-scope LLM API request bodies.
 It sits between your AI tools (Claude Code, the OpenAI SDK, …) and the
-provider. On the way out it swaps every secret for a **format-preserving
-fake**; on the way back it restores the original. The provider only ever
-sees the fake — your real keys never leave the machine.
+provider. On the way out it swaps those secrets for **format-preserving
+fakes**; on the way back it restores complete known fakes found in responses.
+For a matched, mask-eligible body secret, the provider sees the fake. Upstream
+authentication headers are intentionally outside masking because the provider
+needs the real credential.
 
 ```
   AI tool ──HTTPS──▶  osm proxy  ──HTTPS──▶  api.anthropic.com
-                      │ mask request body     (sees only fakes)
+                      │ mask request body     (eligible matches are fake)
                       │ unmask JSON / SSE
   AI tool ◀─HTTPS───  osm proxy  ◀─HTTPS───  api.anthropic.com
 ```
@@ -139,13 +142,16 @@ unexpected paths and adjust scoping if needed.
 ## Dashboard
 
 `osm proxy` serves a dashboard at `http://127.0.0.1:8788`: live request
-history, the secret store, and per-secret reveal-on-click. Secrets are shown
-masked — the plaintext is decrypted only when you explicitly reveal it.
+history, the secret store, and per-secret reveal-on-click. Mask-eligible
+matches are shown as fakes until explicit reveal. Captured provider-owned opaque
+fields can already contain original bytes and are not covered by that display
+guarantee.
 
 ## Security model
 
-- **Registered secrets** (`osm add`, `osm preload`) are matched exactly and
-  are the **guaranteed** layer — they are always masked.
+- **Registered secrets** (`osm add`, `osm preload`) are the exact-match layer
+  for mask-eligible body fields. Headers, attachment subtrees, data URLs, and
+  provider-owned opaque fields are outside that guarantee.
 - **Pattern / entropy detection** is best-effort: it catches common
   credential formats but is not a guarantee. Register anything critical.
 - The proxy **fails closed** — if a request body cannot be masked, the
@@ -153,16 +159,29 @@ masked — the plaintext is decrypted only when you explicitly reveal it.
 - The local CA private key lives at `~/.opensecretmask/ca-key.pem` (mode
   `0600`). Anything that can read it could intercept your HTTPS traffic;
   treat it like any other private key.
-- `osm` binds to loopback only. The dashboard can reveal decrypted secrets —
-  keep it loopback-only.
+- Proxy and dashboard listeners default to loopback, but the listen-address
+  flags can override that default. A non-loopback proxy is an unauthenticated
+  general CONNECT proxy; a non-loopback dashboard exposes plaintext reveal
+  routes. Never bind either listener beyond loopback.
 
 ## Limitations
 
-- v1 matches secrets as raw bytes; a secret the client JSON-escapes (quotes,
-  backslashes) may be missed. Provider API keys are escape-safe.
-- The dashboard has no authentication beyond the loopback bind.
+- JSON bodies are decoded and masked in string leaves; non-JSON bodies use raw
+  byte matching. Data URLs and base64-like payload strings are intentionally
+  skipped.
+- Anthropic thinking signatures and redacted-thinking data are restored
+  byte-for-byte after masking so the provider accepts them. They are forwarded
+  and can be retained in request history in original form.
+- Only traffic using the proxy and matching an intercepted host is protected.
+  Out-of-scope paths are forwarded unmasked, and headers are never masked.
+- The dashboard has no authentication. Its reveal routes can return plaintext
+  originals; loopback is a deployment requirement, not an enforced invariant.
 
 ## Development
+
+Architecture deepening candidates, security prerequisites, and evidence are
+documented in
+[docs/architecture-review/](docs/architecture-review/README.md).
 
 ```sh
 make build             # go build -o osm ./cmd/osm
