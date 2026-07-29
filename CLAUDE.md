@@ -15,6 +15,7 @@ the responses. Real credentials never reach the provider.
 | `internal/detect` | pluggable `Provider`s (builtin, llm, cloud, chat, git) + Shannon entropy |
 | `internal/mask` | format-preserving garble, masker, streaming unmasker |
 | `internal/proxy` | `goproxy` CA-MITM, route-by-host, request/response masking |
+| `internal/proxyproc` | proxy-process runtime: ordered construction with rollback, listener ownership, serving, bounded drain |
 | `internal/dashboard` | embedded htmx + daisyUI web UI: tabbed overview / requests / secrets, per-request debug view |
 | `internal/shell` | embedded posix-shell init script + rc-file installer; modelled on AikidoSec/safe-chain |
 
@@ -44,6 +45,17 @@ the responses. Real credentials never reach the provider.
   `rules_<name>.go` file + append the provider literal. No allowlists, no
   gitleaks-style anchors — prefix-distinctive regexes only, so detection
   stays stateless across JSON bodies, headers, and bare tokens.
+- The proxy process's runtime lives in `internal/proxyproc`, not in the Cobra
+  closure. `Start` acquires the CA, store, masker, provider policy, both
+  listeners, and both servers in dependency order, registering an undo step per
+  acquisition, so a failure at any step unwinds exactly what was acquired.
+  `Serve` runs both servers, drains them on cancellation, and releases the
+  daemon record and the store.
+- Ownership split: `internal/daemon` is the only writer of the pidfile.
+  `internal/proxyproc` receives `Publish`/`Unpublish` callbacks and decides
+  only when they fire — after both listeners bind, and after serving stops.
+  The runtime never installs a signal handler; the CLI converts signals to
+  cancellation at the process edge.
 
 ## Performance design
 
