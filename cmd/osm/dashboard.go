@@ -1,11 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
 
 	"github.com/spf13/cobra"
+
+	"github.com/pratikbin/opensecretmask/internal/daemon"
 )
 
 func dashboardCmd() *cobra.Command {
@@ -18,11 +21,11 @@ func dashboardCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			p, err := readPidFile(home)
-			if err != nil {
-				return fmt.Errorf("no running daemon (start with 'osm run'): %w", err)
+			p, ok := daemon.Status(home)
+			if p == nil {
+				return errors.New("no running daemon (start with 'osm run')")
 			}
-			if !daemonHealthy(p) {
+			if !ok {
 				return fmt.Errorf("daemon pid=%d is not healthy (start with 'osm run')", p.PID)
 			}
 			url := "http://" + p.DashAddr

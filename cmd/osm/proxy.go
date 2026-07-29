@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pratikbin/opensecretmask/internal/daemon"
 	"github.com/pratikbin/opensecretmask/internal/dashboard"
 	"github.com/pratikbin/opensecretmask/internal/proxy"
 )
@@ -107,10 +108,12 @@ func proxyCmd() *cobra.Command {
 				Logger:    logger,
 			})
 
-			// Pidfile is the single source of truth that 'osm run' polls for
-			// daemon discovery. Written after listeners bind, removed on
-			// shutdown so a clean exit leaves no stale record.
-			if err := writePidFile(home, pidInfo{
+			// The record is the single source of truth 'osm run' polls for
+			// daemon discovery. Published after the listeners bind — with
+			// --listen :0 this process is the only party that knows the
+			// resulting addresses — and removed on shutdown so a clean exit
+			// leaves nothing stale behind.
+			if err := daemon.Publish(home, daemon.Info{
 				PID:           os.Getpid(),
 				ProxyAddr:     proxyAddr,
 				DashAddr:      dashAddr,
@@ -124,7 +127,7 @@ func proxyCmd() *cobra.Command {
 				_ = dashLn.Close()
 				return fmt.Errorf("write pidfile: %w", err)
 			}
-			defer func() { _ = removePidFile(home) }()
+			defer func() { _ = daemon.Unpublish(home) }()
 
 			logger.Info("proxy listening", "addr", proxyAddr, "dashboard", "http://"+dashAddr)
 			for _, p := range providers {
