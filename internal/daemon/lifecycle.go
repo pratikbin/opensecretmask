@@ -21,6 +21,9 @@ type SpawnConfig struct {
 	Entropy       bool
 	LogLevel      string
 	AllowExternal bool
+	// HistoryRetention is the --history-retention value as a duration string.
+	// Empty means the spawned process applies its own default.
+	HistoryRetention string
 }
 
 // args renders the 'osm proxy' argv for this configuration. An empty LogLevel
@@ -40,6 +43,9 @@ func (c SpawnConfig) args() []string {
 	}
 	if c.AllowExternal {
 		args = append(args, "--allow-external-bind")
+	}
+	if c.HistoryRetention != "" {
+		args = append(args, "--history-retention", c.HistoryRetention)
 	}
 	return args
 }
@@ -62,7 +68,7 @@ func spawnConfigFrom(home string, in *Info, key string) SpawnConfig {
 	return SpawnConfig{
 		Home: home, Listen: in.ProxyAddr, Dash: in.DashAddr, Key: key,
 		Extra: in.Extra, Entropy: in.Entropy, LogLevel: in.LogLevel,
-		AllowExternal: in.AllowExternal,
+		AllowExternal: in.AllowExternal, HistoryRetention: in.HistoryRetention,
 	}
 }
 

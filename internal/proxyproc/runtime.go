@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/pratikbin/opensecretmask/internal/dashboard"
 	"github.com/pratikbin/opensecretmask/internal/detect"
@@ -39,6 +40,9 @@ type Config struct {
 	ExtraProviders []string
 	// Entropy enables high-entropy token detection alongside the rule set.
 	Entropy bool
+	// HistoryRetention is how long captured requests are kept. Zero disables
+	// purging; negative is an error.
+	HistoryRetention time.Duration
 	// Logger receives runtime events; nil discards them.
 	Logger *slog.Logger
 
@@ -78,6 +82,10 @@ type Runtime struct {
 // this lives in one function: partial-startup cleanup is a single invariant,
 // not four hand-written branches.
 func Start(ctx context.Context, cfg Config) (*Runtime, error) {
+	if cfg.HistoryRetention < 0 {
+		return nil, fmt.Errorf("history retention must not be negative, got %s", cfg.HistoryRetention)
+	}
+
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
@@ -161,7 +169,11 @@ func Start(ctx context.Context, cfg Config) (*Runtime, error) {
 	}
 	undo = append(undo, func() { _ = dashLn.Close() })
 
-	rec := history.NewRecorder(history.Config{Store: st, Logger: logger})
+	rec := history.NewRecorder(history.Config{
+		Store:     st,
+		Logger:    logger,
+		Retention: cfg.HistoryRetention,
+	})
 	undo = append(undo, rec.Close)
 
 	dashSrv, err := dashboard.NewServer(st, rec, logger)

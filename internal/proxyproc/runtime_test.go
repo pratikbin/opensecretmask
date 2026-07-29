@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pratikbin/opensecretmask/internal/proxy"
 	"github.com/pratikbin/opensecretmask/internal/proxyproc"
@@ -202,5 +203,13 @@ func TestStartParsesExtraProviders(t *testing.T) {
 	}
 	if last[1].Host != "bare.example.com" || last[1].Dialect != "custom" {
 		t.Errorf("provider[-1] = %+v, want bare.example.com/custom", last[1])
+	}
+}
+
+func TestStartRejectsNegativeRetention(t *testing.T) {
+	cfg := baseConfig(newHome(t))
+	cfg.HistoryRetention = -time.Hour
+	if _, err := proxyproc.Start(context.Background(), cfg); err == nil {
+		t.Fatal("Start = nil error with a negative retention")
 	}
 }

@@ -35,6 +35,9 @@ type Info struct {
 	Entropy       bool     `json:"entropy,omitempty"`
 	LogLevel      string   `json:"log_level,omitempty"`
 	AllowExternal bool     `json:"allow_external,omitempty"`
+	// HistoryRetention is the --history-retention value as a duration string.
+	// Empty means the spawned process applies its own default.
+	HistoryRetention string `json:"history_retention,omitempty"`
 }
 
 func statePath(home string) string { return filepath.Join(home, PidFileName) }
