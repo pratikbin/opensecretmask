@@ -29,15 +29,17 @@ type pidInfo struct {
 	StartedAt time.Time `json:"started_at"`
 	// Spawn config — preserved across 'osm restart' so a fresh binary
 	// comes back up with the same providers / entropy / log level.
-	Extra    []string `json:"extra,omitempty"`
-	Entropy  bool     `json:"entropy,omitempty"`
-	LogLevel string   `json:"log_level,omitempty"`
+	Extra         []string `json:"extra,omitempty"`
+	Entropy       bool     `json:"entropy,omitempty"`
+	LogLevel      string   `json:"log_level,omitempty"`
+	AllowExternal bool     `json:"allow_external,omitempty"`
 }
 
 type daemonOpts struct {
-	extra    []string
-	entropy  bool
-	logLevel string
+	extra         []string
+	entropy       bool
+	logLevel      string
+	allowExternal bool
 }
 
 func pidFilePath(home string) string { return filepath.Join(home, pidFileName) }
@@ -160,6 +162,9 @@ func spawnDaemon(home, listen, dash, osmKey string, opts daemonOpts) error {
 	}
 	if opts.entropy {
 		args = append(args, "--detect-entropy")
+	}
+	if opts.allowExternal {
+		args = append(args, "--allow-external-bind")
 	}
 	logF, err := os.OpenFile(filepath.Join(home, daemonLogName), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304 -- daemon log path is internal (under $OPENSECRETMASK_HOME)
 	if err != nil {

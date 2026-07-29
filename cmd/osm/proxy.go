@@ -29,17 +29,24 @@ const shutdownTimeout = 10 * time.Second
 
 func proxyCmd() *cobra.Command {
 	var (
-		listen   string
-		dash     string
-		extra    []string
-		entropy  bool
-		logLevel string
+		listen        string
+		dash          string
+		extra         []string
+		entropy       bool
+		logLevel      string
+		allowExternal bool
 	)
 	cmd := &cobra.Command{
 		Use:   "proxy",
 		Short: "Run the masking proxy and dashboard",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := validateListenAddr(listen, allowExternal); err != nil {
+				return err
+			}
+			if err := validateListenAddr(dash, allowExternal); err != nil {
+				return err
+			}
 			logger, err := newLogger(os.Stderr, logLevel)
 			if err != nil {
 				return err
@@ -104,13 +111,14 @@ func proxyCmd() *cobra.Command {
 			// daemon discovery. Written after listeners bind, removed on
 			// shutdown so a clean exit leaves no stale record.
 			if err := writePidFile(home, pidInfo{
-				PID:       os.Getpid(),
-				ProxyAddr: proxyAddr,
-				DashAddr:  dashAddr,
-				StartedAt: time.Now(),
-				Extra:     extra,
-				Entropy:   entropy,
-				LogLevel:  logLevel,
+				PID:           os.Getpid(),
+				ProxyAddr:     proxyAddr,
+				DashAddr:      dashAddr,
+				StartedAt:     time.Now(),
+				Extra:         extra,
+				Entropy:       entropy,
+				LogLevel:      logLevel,
+				AllowExternal: allowExternal,
 			}); err != nil {
 				_ = pxyLn.Close()
 				_ = dashLn.Close()
@@ -166,6 +174,8 @@ func proxyCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&extra, "provider", nil, "extra host to intercept (host or host=dialect)")
 	cmd.Flags().BoolVar(&entropy, "detect-entropy", false, "also mask high-entropy tokens (may over-mask)")
 	cmd.Flags().StringVar(&logLevel, "log-level", "info", "log verbosity: debug, info, warn, error")
+	cmd.Flags().BoolVar(&allowExternal, "allow-external-bind", false,
+		"allow --listen/--dashboard to bind non-loopback addresses (dangerous: unauthenticated proxy and reveal routes)")
 	return cmd
 }
 

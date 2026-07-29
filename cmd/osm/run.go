@@ -27,11 +27,12 @@ const watchdogInterval = 2 * time.Second
 
 func runCmd() *cobra.Command {
 	var (
-		listen   string
-		dash     string
-		extra    []string
-		entropy  bool
-		logLevel string
+		listen        string
+		dash          string
+		extra         []string
+		entropy       bool
+		logLevel      string
+		allowExternal bool
 	)
 	cmd := &cobra.Command{
 		Use:   "run [flags] -- command [args...]",
@@ -69,8 +70,14 @@ func runCmd() *cobra.Command {
 			// unlocked from its own startup.
 			p, _ := readPidFile(home)
 			var osmKey string
-			opts := daemonOpts{extra: extra, entropy: entropy, logLevel: logLevel}
+			opts := daemonOpts{extra: extra, entropy: entropy, logLevel: logLevel, allowExternal: allowExternal}
 			if !daemonHealthy(p) {
+				if err := validateListenAddr(listen, allowExternal); err != nil {
+					return err
+				}
+				if err := validateListenAddr(dash, allowExternal); err != nil {
+					return err
+				}
 				key, kerr := passphrase()
 				if kerr != nil {
 					return kerr
@@ -99,6 +106,7 @@ func runCmd() *cobra.Command {
 				if p.LogLevel != "" {
 					opts.logLevel = p.LogLevel
 				}
+				opts.allowExternal = p.AllowExternal
 			}
 
 			proxyURL := "http://" + p.ProxyAddr
@@ -139,6 +147,8 @@ func runCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&extra, "provider", nil, "extra host to intercept when spawning daemon (host or host=dialect)")
 	cmd.Flags().BoolVar(&entropy, "detect-entropy", false, "also mask high-entropy tokens when spawning daemon")
 	cmd.Flags().StringVar(&logLevel, "log-level", "info", "proxy log verbosity when spawning daemon: debug, info, warn, error")
+	cmd.Flags().BoolVar(&allowExternal, "allow-external-bind", false,
+		"allow non-loopback listener binds when spawning the daemon (dangerous)")
 	// Stop flag parsing at the first positional so flags meant for the child
 	// command (e.g. 'osm run claude --resume') are passed through untouched.
 	cmd.Flags().SetInterspersed(false)
