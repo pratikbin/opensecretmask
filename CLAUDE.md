@@ -10,6 +10,7 @@ the responses. Real credentials never reach the provider.
 | --- | --- |
 | `cmd/osm` | cobra CLI: `init`, `uninstall`, `proxy`, `run`, `add`, `preload`, `status`, `doctor`, `shell` |
 | `internal/crypto` | AES-256-GCM + Argon2id key derivation |
+| `internal/daemon` | background-daemon lifecycle: record, health, serialized spawn, watch, stop, restart |
 | `internal/store` | encrypted SQLite (`modernc.org/sqlite`, no cgo) |
 | `internal/detect` | pluggable `Provider`s (builtin, llm, cloud, chat, git) + Shannon entropy |
 | `internal/mask` | format-preserving garble, masker, streaming unmasker |
@@ -117,6 +118,18 @@ SIGTERM removes the pidfile so the next `osm run` doesn't see it as healthy.
 Concurrency-safe: two simultaneous `osm run` invocations serialize on
 `flock(proxy.pid.lock)` during the check-and-spawn window so the loser
 reuses what the winner started instead of racing a duplicate daemon.
+
+All of this lives in `internal/daemon`. The CLI commands are adapters: they
+resolve flags, environment, and the passphrase, then make one lifecycle call
+(`Status`, `Ensure`, `Stop`, `Restart`, `Watch`) and render the result. The
+proxy process itself publishes the record via `daemon.Publish` — with
+`--listen :0` it is the only party that knows the bound addresses. Every OS
+interaction the package performs goes through an unexported seam struct, so
+its tests drive spawn failure, readiness timeout, PID reuse, and
+cancellation-during-respawn without fork-exec or real sleeps.
+
+`osm restart` works against a stale record too: it clears the record and
+brings a fresh daemon up on the recorded addresses.
 
 Passphrase flow: the daemon needs `$OSM_KEY` to unlock the store at startup.
 When `osm run` is the spawner, it reads `OSM_KEY` (or prompts once) and
