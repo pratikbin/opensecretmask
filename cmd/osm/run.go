@@ -73,8 +73,12 @@ func runCmd() *cobra.Command {
 				if err := validateListenAddr(dash, allowExternal); err != nil {
 					return err
 				}
-				if _, perr := time.ParseDuration(historyRetention); perr != nil {
+				retention, perr := time.ParseDuration(historyRetention)
+				if perr != nil {
 					return fmt.Errorf("invalid --history-retention %q: %w", historyRetention, perr)
+				}
+				if retention < 0 {
+					return fmt.Errorf("invalid --history-retention %q: must not be negative", historyRetention)
 				}
 				key, kerr := passphrase()
 				if kerr != nil {
