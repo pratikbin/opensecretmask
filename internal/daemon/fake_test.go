@@ -199,9 +199,6 @@ func (f *fakeSys) events() []string {
 	return append([]string(nil), f.log...)
 }
 
-// tickNow is unused until Task 5 adds the watch loop that calls it; nolint is
-// temporary, same as the sys var in Task 1, and comes out with its first caller.
-
 func (f *fakeSys) spawns() []SpawnConfig {
 	f.mu.Lock()
 	defer f.mu.Unlock()

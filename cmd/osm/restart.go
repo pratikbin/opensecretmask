@@ -19,7 +19,7 @@ func restartCmd() *cobra.Command {
 			"log-level config preserved in proxy.pid. Use after rebuilding the\n" +
 			"binary to pick up changes (dashboard tweaks, new detection rules)\n" +
 			"without losing the daemon's spawn configuration.\n\n" +
-			"A record left behind by a daemon that died uncritically is not an\n" +
+			"A record left behind by a daemon that died uncleanly is not an\n" +
 			"error: restart clears it and brings a fresh daemon up on the same\n" +
 			"addresses.\n\n" +
 			"Requires $OSM_KEY in the environment (or a TTY for the prompt) —\n" +

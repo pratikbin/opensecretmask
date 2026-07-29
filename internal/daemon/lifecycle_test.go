@@ -188,16 +188,19 @@ func TestStopIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestStopDoesNotSignalUnhealthyRecord(t *testing.T) {
+func TestStopErrorsOnUnhealthyRecordWithoutSignalling(t *testing.T) {
 	f := installFake(t)
-	// PID reused after a reboot: alive, but nothing is bound to the recorded
-	// address, so healthy() (the same check Status/Ensure use) says no. Stop
-	// must not signal a process it never started.
+	// The PID is alive but nothing is bound to the recorded address, so
+	// healthy() (the same check Status/Ensure use) says no. This is
+	// ambiguous — PID reuse after a reboot, or our own daemon in a bad
+	// moment — so Stop must neither signal a process it never started nor
+	// silently report success: a live process may still be holding the
+	// port, which would orphan it. It clears the record and errors.
 	f.writeState(home, Info{PID: 10, ProxyAddr: "127.0.0.1:8787"})
 	f.setAlive(10, true)
 
-	if err := Stop(home); err != nil {
-		t.Fatalf("Stop(unhealthy) = %v, want nil", err)
+	if err := Stop(home); err == nil {
+		t.Fatal("Stop(unhealthy) = nil, want error")
 	}
 	if f.hasState(home) {
 		t.Error("stale record survived Stop")

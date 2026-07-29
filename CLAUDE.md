@@ -126,10 +126,13 @@ proxy process itself publishes the record via `daemon.Publish` — with
 `--listen :0` it is the only party that knows the bound addresses. Every OS
 interaction the package performs goes through an unexported seam struct, so
 its tests drive spawn failure, readiness timeout, PID reuse, and
-cancellation-during-respawn without fork-exec or real sleeps.
+cancellation-during-respawn without fork-exec or multi-second waits.
 
 `osm restart` works against a stale record too: it clears the record and
-brings a fresh daemon up on the recorded addresses.
+brings a fresh daemon up on the recorded addresses. The watchdog (`Watch`)
+reads its spawn configuration from the daemon's own persisted record rather
+than inheriting it from the `osm run` invocation that started watching, so a
+respawn always matches what is actually on disk.
 
 Passphrase flow: the daemon needs `$OSM_KEY` to unlock the store at startup.
 When `osm run` is the spawner, it reads `OSM_KEY` (or prompts once) and
