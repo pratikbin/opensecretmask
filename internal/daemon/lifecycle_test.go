@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 const home = "/osm-home"
@@ -163,5 +164,107 @@ func TestEnsureReadinessTimeout(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("err %q missing %q", err, want)
 		}
+	}
+}
+
+func TestStopIsIdempotent(t *testing.T) {
+	f := installFake(t)
+
+	// No record at all.
+	if err := Stop(home); err != nil {
+		t.Fatalf("Stop(absent) = %v, want nil", err)
+	}
+
+	// Record whose process is already gone: clear it, signal nothing.
+	f.writeState(home, Info{PID: 10, ProxyAddr: "127.0.0.1:8787"})
+	if err := Stop(home); err != nil {
+		t.Fatalf("Stop(dead) = %v, want nil", err)
+	}
+	if f.hasState(home) {
+		t.Error("stale record survived Stop")
+	}
+	if slices.ContainsFunc(f.events(), func(e string) bool { return strings.HasPrefix(e, "signal:") }) {
+		t.Error("Stop signalled a dead process")
+	}
+}
+
+func TestStopSignalsAndWaitsForFullExit(t *testing.T) {
+	f := installFake(t)
+	f.writeState(home, Info{PID: 10, ProxyAddr: "127.0.0.1:8787"})
+	f.setAlive(10, true)
+	f.setOpen("127.0.0.1:8787", true)
+
+	// Model a clean SIGTERM: the daemon removes its own record, then exits.
+	// The exit lands one poll after the record disappears, so the test proves
+	// Stop waits for BOTH conditions rather than either one.
+	prevSleep := sys.sleep
+	step := 0
+	sys.sleep = func(d time.Duration) {
+		step++
+		switch step {
+		case 1:
+			f.mu.Lock()
+			delete(f.files, statePath(home))
+			f.mu.Unlock()
+		case 2:
+			f.setAlive(10, false)
+		}
+		prevSleep(d)
+	}
+
+	if err := Stop(home); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if step < 2 {
+		t.Fatalf("Stop returned after %d polls, want at least 2 (dead PID and absent record)", step)
+	}
+	if !slices.Contains(f.events(), "signal:10") {
+		t.Error("Stop did not signal the daemon")
+	}
+}
+
+func TestStopTimesOutOnHungDaemon(t *testing.T) {
+	f := installFake(t)
+	f.writeState(home, Info{PID: 10, ProxyAddr: "127.0.0.1:8787"})
+	f.setAlive(10, true)
+
+	err := Stop(home)
+	if err == nil || !strings.Contains(err.Error(), "did not exit within") {
+		t.Fatalf("Stop(hung) = %v, want timeout error", err)
+	}
+}
+
+func TestRestartWithoutRecord(t *testing.T) {
+	installFake(t)
+	if _, err := Restart(home, "pass"); !errors.Is(err, ErrNoDaemon) {
+		t.Fatalf("Restart(absent) = %v, want ErrNoDaemon", err)
+	}
+}
+
+func TestRestartPreservesAddressesAndConfig(t *testing.T) {
+	f := installFake(t)
+	f.writeState(home, Info{
+		PID: 10, ProxyAddr: "127.0.0.1:8787", DashAddr: "127.0.0.1:8788",
+		Extra: []string{"api.acme.com"}, Entropy: true, LogLevel: "debug",
+		AllowExternal: true,
+	})
+	// Dead PID — restart from a stale record is a supported path: Stop clears
+	// the record and Ensure brings a fresh daemon up on the same addresses.
+
+	np, err := Restart(home, "pass")
+	if err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	if np.PID != 4242 {
+		t.Errorf("PID = %d, want 4242", np.PID)
+	}
+	got := f.spawns()
+	if len(got) != 1 {
+		t.Fatalf("spawns = %d, want 1", len(got))
+	}
+	if got[0].Listen != "127.0.0.1:8787" || got[0].Dash != "127.0.0.1:8788" ||
+		got[0].Key != "pass" || !got[0].Entropy || !got[0].AllowExternal ||
+		got[0].LogLevel != "debug" || !slices.Equal(got[0].Extra, []string{"api.acme.com"}) {
+		t.Fatalf("restart did not preserve configuration: %+v", got[0])
 	}
 }

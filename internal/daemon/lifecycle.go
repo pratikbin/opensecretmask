@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -55,8 +57,6 @@ const (
 // with, so a respawn lands on the same addresses with the same behaviour. The
 // addresses matter: a child process already holds HTTPS_PROXY pointing at
 // ProxyAddr and cannot be told about a new one.
-//
-//nolint:unused // consumed starting in Task 4 (Restart)
 func spawnConfigFrom(home string, in *Info, key string) SpawnConfig {
 	return SpawnConfig{
 		Home: home, Listen: in.ProxyAddr, Dash: in.DashAddr, Key: key,
@@ -120,4 +120,59 @@ func Ensure(cfg SpawnConfig) (*Info, bool, error) {
 	}
 	return nil, false, fmt.Errorf("daemon did not become ready within %s — see %s",
 		startTimeout, filepath.Join(cfg.Home, LogName))
+}
+
+// stopTimeout bounds how long Stop waits for the daemon to disappear after
+// SIGTERM. The daemon drains in-flight requests (10s in the proxy runtime)
+// before its own teardown, so this must exceed that.
+const stopTimeout = 15 * time.Second
+
+// ErrNoDaemon reports that no daemon record exists, so there is nothing to act
+// on. Adapters render it as "start with 'osm run'".
+var ErrNoDaemon = errors.New("no daemon record")
+
+// Stop terminates the recorded daemon and waits for it to disappear. It is
+// idempotent: no record, or a record whose process is already gone, is
+// success with the stale record removed.
+//
+// "Gone" means both a dead PID and an absent record. A clean SIGTERM makes the
+// daemon remove its own record; without waiting for that, a following Ensure
+// would see the leftover entry and could mistake it for a live daemon.
+func Stop(home string) error {
+	in, err := readState(home)
+	if err != nil {
+		return Unpublish(home)
+	}
+	if !sys.alive(in.PID) {
+		return Unpublish(home)
+	}
+	if err := sys.signal(in.PID, syscall.SIGTERM); err != nil {
+		return fmt.Errorf("signal daemon pid=%d: %w", in.PID, err)
+	}
+	deadline := sys.now().Add(stopTimeout)
+	for sys.now().Before(deadline) {
+		sys.sleep(pollInterval)
+		_, rerr := readState(home)
+		if !sys.alive(in.PID) && rerr != nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("daemon pid=%d did not exit within %s", in.PID, stopTimeout)
+}
+
+// Restart stops the recorded daemon and brings a fresh one up on the same
+// addresses with the same spawn configuration, so a rebuilt binary takes over
+// without the caller re-supplying flags. key unlocks the store in the new
+// process; this package never prompts for it.
+func Restart(home, key string) (*Info, error) {
+	in, err := readState(home)
+	if err != nil {
+		return nil, ErrNoDaemon
+	}
+	cfg := spawnConfigFrom(home, in, key)
+	if err := Stop(home); err != nil {
+		return nil, err
+	}
+	np, _, err := Ensure(cfg)
+	return np, err
 }
