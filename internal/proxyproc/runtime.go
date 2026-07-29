@@ -83,8 +83,8 @@ func Start(ctx context.Context, cfg Config) (*Runtime, error) {
 
 	var undo []func()
 	rollback := func() {
-		for _, i := range slices.Backward(undo) {
-			i()
+		for _, undoFn := range slices.Backward(undo) {
+			undoFn()
 		}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -23,30 +24,52 @@ const shutdownTimeout = 10 * time.Second
 // whether it is a foreground command or a daemon.
 func (r *Runtime) Serve(ctx context.Context) error {
 	g, gctx := errgroup.WithContext(ctx)
+
+	// errgroup only cancels gctx when a member returns non-nil, or when
+	// Wait itself returns — which can't happen while the drain goroutine
+	// below is still blocked inside that same Wait. So the drain goroutine
+	// must also wake when both servers have already exited on their own
+	// (e.g. a caller-supplied ctx that is never cancelled, or a second Serve
+	// on a Runtime whose servers are already shut down): stopped closes once
+	// both server goroutines finish, and the drain select watches it
+	// alongside gctx.Done().
+	var srvWG sync.WaitGroup
+	srvWG.Add(2)
+	stopped := make(chan struct{})
+	go func() { srvWG.Wait(); close(stopped) }()
+
 	g.Go(func() error {
+		defer srvWG.Done()
 		if err := r.pxy.Serve(r.pxyLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return err
 		}
 		return nil
 	})
 	g.Go(func() error {
+		defer srvWG.Done()
 		if err := r.dash.Serve(r.dashLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return err
 		}
 		return nil
 	})
 	g.Go(func() error {
-		<-gctx.Done()
+		select {
+		case <-gctx.Done():
+		case <-stopped:
+			return nil // both servers already exited; nothing to drain
+		}
 		sctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		r.logger.Info("shutting down, draining requests")
-		if err := r.pxy.Shutdown(sctx); err != nil {
-			r.logger.Error("proxy shutdown", "err", err)
+		pxyErr := r.pxy.Shutdown(sctx)
+		if pxyErr != nil {
+			r.logger.Error("proxy shutdown", "err", pxyErr)
 		}
-		if err := r.dash.Shutdown(sctx); err != nil {
-			r.logger.Error("dashboard shutdown", "err", err)
+		dashErr := r.dash.Shutdown(sctx)
+		if dashErr != nil {
+			r.logger.Error("dashboard shutdown", "err", dashErr)
 		}
-		return nil
+		return errors.Join(pxyErr, dashErr)
 	})
 	serveErr := g.Wait()
 

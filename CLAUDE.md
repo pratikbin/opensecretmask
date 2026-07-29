@@ -47,8 +47,9 @@ the responses. Real credentials never reach the provider.
   stays stateless across JSON bodies, headers, and bare tokens.
 - The proxy process's runtime lives in `internal/proxyproc`, not in the Cobra
   closure. `Start` acquires the CA, store, masker, provider policy, both
-  listeners, and both servers in dependency order, registering an undo step per
-  acquisition, so a failure at any step unwinds exactly what was acquired.
+  listeners, and both servers in dependency order, registering an undo step
+  for each acquisition that holds an OS resource, so a failure at any step
+  unwinds exactly what was acquired.
   `Serve` runs both servers, drains them on cancellation, and releases the
   daemon record and the store.
 - Ownership split: `internal/daemon` is the only writer of the pidfile.
