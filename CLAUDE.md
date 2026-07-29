@@ -125,9 +125,12 @@ already holds the unlocked store. `osm shell` wrappers must therefore have
 `OSM_KEY` exported, or the first invocation must run in a TTY.
 
 Flags `--listen`, `--dashboard`, `--provider`, `--detect-entropy`,
-`--log-level` on `osm run` apply **only when spawning**; once a daemon is
-running, flag changes on subsequent `osm run` calls are ignored. Restart the
-daemon to pick them up.
+`--log-level`, `--allow-external-bind` on `osm run` apply **only when
+spawning**; once a daemon is running, flag changes on subsequent `osm run`
+calls are ignored. Restart the daemon to pick them up. Both listener
+addresses are validated against loopback at startup
+(`cmd/osm/listen.go`) unless `--allow-external-bind` is set; the policy is
+persisted in the pidfile spawn config.
 
 ## Shell integration (`osm shell`)
 
