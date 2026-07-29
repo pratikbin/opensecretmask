@@ -15,17 +15,19 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pratikbin/opensecretmask/internal/daemon"
+	"github.com/pratikbin/opensecretmask/internal/history"
 	"github.com/pratikbin/opensecretmask/internal/proxyproc"
 )
 
 func proxyCmd() *cobra.Command {
 	var (
-		listen        string
-		dash          string
-		extra         []string
-		entropy       bool
-		logLevel      string
-		allowExternal bool
+		listen           string
+		dash             string
+		extra            []string
+		entropy          bool
+		logLevel         string
+		allowExternal    bool
+		historyRetention string
 	)
 	cmd := &cobra.Command{
 		Use:   "proxy",
@@ -42,31 +44,37 @@ func proxyCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			retention, err := time.ParseDuration(historyRetention)
+			if err != nil {
+				return fmt.Errorf("invalid --history-retention %q: %w", historyRetention, err)
+			}
 			home, err := homeDir()
 			if err != nil {
 				return err
 			}
 
 			rt, err := proxyproc.Start(cmd.Context(), proxyproc.Config{
-				Home:           home,
-				Listen:         listen,
-				Dash:           dash,
-				ExtraProviders: extra,
-				Entropy:        entropy,
-				Logger:         logger,
-				Passphrase:     passphrase,
+				Home:             home,
+				Listen:           listen,
+				Dash:             dash,
+				ExtraProviders:   extra,
+				Entropy:          entropy,
+				HistoryRetention: retention,
+				Logger:           logger,
+				Passphrase:       passphrase,
 				// The runtime knows the bound addresses; this adapter knows
 				// the flags the daemon record must preserve for a respawn.
 				Publish: func(proxyAddr, dashAddr string) error {
 					return daemon.Publish(home, daemon.Info{
-						PID:           os.Getpid(),
-						ProxyAddr:     proxyAddr,
-						DashAddr:      dashAddr,
-						StartedAt:     time.Now(),
-						Extra:         extra,
-						Entropy:       entropy,
-						LogLevel:      logLevel,
-						AllowExternal: allowExternal,
+						PID:              os.Getpid(),
+						ProxyAddr:        proxyAddr,
+						DashAddr:         dashAddr,
+						StartedAt:        time.Now(),
+						Extra:            extra,
+						Entropy:          entropy,
+						LogLevel:         logLevel,
+						AllowExternal:    allowExternal,
+						HistoryRetention: historyRetention,
 					})
 				},
 				Unpublish: func() { _ = daemon.Unpublish(home) },
@@ -98,6 +106,8 @@ func proxyCmd() *cobra.Command {
 	cmd.Flags().StringVar(&logLevel, "log-level", "info", "log verbosity: debug, info, warn, error")
 	cmd.Flags().BoolVar(&allowExternal, "allow-external-bind", false,
 		"allow --listen/--dashboard to bind non-loopback addresses (dangerous: unauthenticated proxy and reveal routes)")
+	cmd.Flags().StringVar(&historyRetention, "history-retention", history.DefaultRetention.String(),
+		"how long to keep captured request history; 0 disables purging")
 	return cmd
 }
 

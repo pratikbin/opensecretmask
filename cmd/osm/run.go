@@ -11,21 +11,24 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/pratikbin/opensecretmask/internal/daemon"
+	"github.com/pratikbin/opensecretmask/internal/history"
 	"github.com/pratikbin/opensecretmask/internal/proxy"
 )
 
 func runCmd() *cobra.Command {
 	var (
-		listen        string
-		dash          string
-		extra         []string
-		entropy       bool
-		logLevel      string
-		allowExternal bool
+		listen           string
+		dash             string
+		extra            []string
+		entropy          bool
+		logLevel         string
+		allowExternal    bool
+		historyRetention string
 	)
 	cmd := &cobra.Command{
 		Use:   "run [flags] -- command [args...]",
@@ -70,6 +73,9 @@ func runCmd() *cobra.Command {
 				if err := validateListenAddr(dash, allowExternal); err != nil {
 					return err
 				}
+				if _, perr := time.ParseDuration(historyRetention); perr != nil {
+					return fmt.Errorf("invalid --history-retention %q: %w", historyRetention, perr)
+				}
 				key, kerr := passphrase()
 				if kerr != nil {
 					return kerr
@@ -78,7 +84,7 @@ func runCmd() *cobra.Command {
 				np, _, derr := daemon.Ensure(daemon.SpawnConfig{
 					Home: home, Listen: listen, Dash: dash, Key: key,
 					Extra: extra, Entropy: entropy, LogLevel: logLevel,
-					AllowExternal: allowExternal,
+					AllowExternal: allowExternal, HistoryRetention: historyRetention,
 				})
 				if derr != nil {
 					return derr
@@ -139,6 +145,8 @@ func runCmd() *cobra.Command {
 	cmd.Flags().StringVar(&logLevel, "log-level", "info", "proxy log verbosity when spawning daemon: debug, info, warn, error")
 	cmd.Flags().BoolVar(&allowExternal, "allow-external-bind", false,
 		"allow non-loopback listener binds when spawning the daemon (dangerous)")
+	cmd.Flags().StringVar(&historyRetention, "history-retention", history.DefaultRetention.String(),
+		"request-history retention when spawning daemon; 0 disables purging")
 	// Stop flag parsing at the first positional so flags meant for the child
 	// command (e.g. 'osm run claude --resume') are passed through untouched.
 	cmd.Flags().SetInterspersed(false)
