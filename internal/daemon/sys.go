@@ -43,10 +43,6 @@ type system struct {
 	spawn     func(cfg SpawnConfig) error
 }
 
-// sys is unused until Task 3 adds the lifecycle operations that call through
-// it; nolint is temporary and comes out with that task's first caller.
-//
-//nolint:unused // consumed starting in Task 3
 var sys = realSystem()
 
 func realSystem() system {

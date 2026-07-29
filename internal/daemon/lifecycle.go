@@ -1,10 +1,5 @@
 package daemon
 
-// LogName is the daemon's stdio log file, relative to $OPENSECRETMASK_HOME.
-// TODO(task-2): moves to state.go beside the pidfile name; delete this line
-// there.
-const LogName = "daemon.log"
-
 // SpawnConfig is everything needed to start a daemon. Key is the store
 // passphrase, handed to the spawned process via $OSM_KEY: this package never
 // prompts, so adapters resolve it from the environment or a terminal first.
