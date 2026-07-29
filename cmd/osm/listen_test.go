@@ -29,6 +29,14 @@ func TestValidateListenAddr(t *testing.T) {
 		{"8.8.8.8:53", "not loopback"},
 		{"example.com:8787", "unresolved hostname"},
 		{"garbage", "invalid listen address"},
+		// Short-form literals whose decoded octets fall outside the
+		// inet_aton bit-width for their part count must not be waved
+		// through as loopback — they fall through to Go's real DNS
+		// resolver at net.Listen time.
+		{"127.0.0.256:8787", "unresolved hostname"},  // 4-part: last octet > 255
+		{"127.16777216:8787", "unresolved hostname"}, // 2-part: last part > 24-bit max
+		{"127:8787", "unresolved hostname"},          // bare integer, not an octet
+		{"127.-1:8787", "unresolved hostname"},       // negative part
 	}
 	for _, tc := range cases {
 		err := validateListenAddr(tc.addr, false)

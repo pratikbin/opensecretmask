@@ -43,23 +43,45 @@ func validateListenAddr(addr string, allowExternal bool) error {
 	return nil
 }
 
-// isShortFormLoopback recognizes legacy BSD-style short-form dotted-decimal
-// loopback literals (e.g. "127.1", "127.0.1") that net.ParseIP rejects but
-// the OS resolver still accepts as within 127.0.0.0/8. Purely numeric string
-// parsing, no DNS involved.
+// isShortFormLoopback decodes legacy BSD-style short-form dotted-decimal
+// address literals (e.g. "127.1" decodes to 127.0.0.1, "127.0.1" decodes to
+// 127.0.0.1) that net.ParseIP rejects but net.Dial's literal-address parser
+// still accepts, per classic inet_aton rules: for N dot-separated parts
+// (2 <= N <= 4), the first N-1 parts are single octets (0-255) and the last
+// part fills the remaining (5-N)*8 bits. The bare single-part form is
+// rejected outright — it decodes as one 32-bit value, not an octet, so it
+// cannot reliably be judged loopback from its leading digits. Any part that
+// doesn't decode within its required width is rejected too, so a string
+// Go's dialer would otherwise send to a real DNS lookup is never waved
+// through as loopback. Loopback membership is decided on the decoded first
+// octet, not on the raw leading token.
 func isShortFormLoopback(host string) bool {
 	parts := strings.Split(host, ".")
-	if len(parts) > 4 {
+	n := len(parts)
+	if n < 2 || n > 4 {
 		return false
 	}
-	for _, p := range parts {
-		if p == "" {
+	vals := make([]uint64, n)
+	for i, p := range parts {
+		v, err := strconv.ParseUint(p, 10, 32)
+		if err != nil {
 			return false
 		}
-		if _, err := strconv.Atoi(p); err != nil {
+		vals[i] = v
+	}
+	// All but the last part are single octets.
+	for _, v := range vals[:n-1] {
+		if v > 255 {
 			return false
 		}
 	}
-	first, err := strconv.Atoi(parts[0])
-	return err == nil && first == 127
+	// The last part absorbs the remaining bits: 24 for the 2-part form,
+	// 16 for 3-part, 8 for 4-part.
+	lastBits := uint(8 * (5 - n))
+	if vals[n-1] >= 1<<lastBits {
+		return false
+	}
+	// The first part is always a single decoded octet regardless of N,
+	// since only the trailing part packs multiple octets.
+	return vals[0] == 127
 }
