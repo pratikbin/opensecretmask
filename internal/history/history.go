@@ -82,6 +82,13 @@ type Recorder struct {
 	store  *store.Store
 	logger *slog.Logger
 
+	// mu serializes Record against Close. Close's Lock waits for in-flight
+	// Records to finish their wg.Go before wg.Wait begins, so a wg.Go can
+	// never land while wg.Wait is parked with a zero counter — that misuse
+	// panics the sync runtime, and goproxy's detached MITM goroutine has no
+	// recover to catch it. A Record arriving after Close proceeds once Close
+	// returns; wg.Go after a fully returned wg.Wait is legal WaitGroup reuse.
+	mu      sync.RWMutex
 	sem     chan struct{} // bounded admission
 	wg      sync.WaitGroup
 	dropped atomic.Int64
@@ -116,6 +123,8 @@ func (r *Recorder) Record(ex Exchange) {
 	if r == nil || r.store == nil {
 		return
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	rec := store.RequestRecord{
 		Provider:   ex.Provider,
 		Host:       ex.Host,
@@ -163,6 +172,8 @@ func (r *Recorder) Close() {
 	if r == nil {
 		return
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.stop.Do(func() { close(r.done) })
 	r.wg.Wait()
 }
