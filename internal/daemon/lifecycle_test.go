@@ -188,6 +188,25 @@ func TestStopIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestStopDoesNotSignalUnhealthyRecord(t *testing.T) {
+	f := installFake(t)
+	// PID reused after a reboot: alive, but nothing is bound to the recorded
+	// address, so healthy() (the same check Status/Ensure use) says no. Stop
+	// must not signal a process it never started.
+	f.writeState(home, Info{PID: 10, ProxyAddr: "127.0.0.1:8787"})
+	f.setAlive(10, true)
+
+	if err := Stop(home); err != nil {
+		t.Fatalf("Stop(unhealthy) = %v, want nil", err)
+	}
+	if f.hasState(home) {
+		t.Error("stale record survived Stop")
+	}
+	if slices.ContainsFunc(f.events(), func(e string) bool { return strings.HasPrefix(e, "signal:") }) {
+		t.Error("Stop signalled an unhealthy (reused-PID) record")
+	}
+}
+
 func TestStopSignalsAndWaitsForFullExit(t *testing.T) {
 	f := installFake(t)
 	f.writeState(home, Info{PID: 10, ProxyAddr: "127.0.0.1:8787"})
@@ -223,10 +242,48 @@ func TestStopSignalsAndWaitsForFullExit(t *testing.T) {
 	}
 }
 
+func TestStopSignalsAndWaitsForFullExitPidFirst(t *testing.T) {
+	f := installFake(t)
+	f.writeState(home, Info{PID: 10, ProxyAddr: "127.0.0.1:8787"})
+	f.setAlive(10, true)
+	f.setOpen("127.0.0.1:8787", true)
+
+	// Mirror of TestStopSignalsAndWaitsForFullExit with the orderings swapped:
+	// the process dies first, the record disappears one poll later. Together
+	// the two tests prove Stop waits for both conditions regardless of which
+	// one settles first — neither an AND-of-either-order nor an OR shortcut
+	// can pass both.
+	prevSleep := sys.sleep
+	step := 0
+	sys.sleep = func(d time.Duration) {
+		step++
+		switch step {
+		case 1:
+			f.setAlive(10, false)
+		case 2:
+			f.mu.Lock()
+			delete(f.files, statePath(home))
+			f.mu.Unlock()
+		}
+		prevSleep(d)
+	}
+
+	if err := Stop(home); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if step < 2 {
+		t.Fatalf("Stop returned after %d polls, want at least 2 (dead PID and absent record)", step)
+	}
+	if !slices.Contains(f.events(), "signal:10") {
+		t.Error("Stop did not signal the daemon")
+	}
+}
+
 func TestStopTimesOutOnHungDaemon(t *testing.T) {
 	f := installFake(t)
 	f.writeState(home, Info{PID: 10, ProxyAddr: "127.0.0.1:8787"})
 	f.setAlive(10, true)
+	f.setOpen("127.0.0.1:8787", true) // healthy — signalled, but never dies
 
 	err := Stop(home)
 	if err == nil || !strings.Contains(err.Error(), "did not exit within") {
