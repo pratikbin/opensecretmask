@@ -3,6 +3,7 @@ package history
 import (
 	"context"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -138,10 +139,10 @@ func TestPurgeOnceDeletesExpiredRequests(t *testing.T) {
 
 	r := NewRecorder(Config{Store: st})
 	defer r.Close()
-	// The store records ts at millisecond precision; sleeping past one
-	// millisecond boundary makes "older than a nanosecond" observable.
-	time.Sleep(2 * time.Millisecond)
-	r.purgeOnce(time.Nanosecond) // everything is already older than this
+	// A negative retention puts the cutoff in the future, so ts < cutoff
+	// holds for the just-inserted row regardless of the store's millisecond
+	// timestamp precision — no sleep needed.
+	r.purgeOnce(-time.Second)
 
 	rows, err := st.ListRequests(context.Background(), 10)
 	if err != nil {
@@ -167,6 +168,34 @@ func TestCloseStopsThePurgeLoop(t *testing.T) {
 	// Close is idempotent: the runtime may call it on more than one teardown
 	// path.
 	r.Close()
+}
+
+func TestRecordConcurrentWithCloseDoesNotPanic(t *testing.T) {
+	// goproxy's MITM loop runs in a detached goroutine that
+	// http.Server.Shutdown does not wait for, so a final Record can race
+	// Close at daemon teardown. Unserialized, when the last in-flight write
+	// drains the WaitGroup counter to zero, a Record's wg.Go landing before
+	// the parked Wait has resumed panics the sync runtime — and goproxy's
+	// goroutine has no recover. len(r.sem) returning to zero marks that
+	// drain instant (the write goroutine has released its slot but not yet
+	// called wg.Done), so pouncing there hits the window with high
+	// probability per iteration if Record and Close are ever unserialized
+	// again.
+	st := newStore(t)
+	for range 300 {
+		r := NewRecorder(Config{Store: st})
+		r.Record(Exchange{Host: "api.anthropic.com", Path: "/v1/messages"})
+		closed := make(chan struct{})
+		go func() {
+			r.Close()
+			close(closed)
+		}()
+		for len(r.sem) != 0 {
+			runtime.Gosched()
+		}
+		r.Record(Exchange{Host: "api.anthropic.com", Path: "/v1/messages"})
+		<-closed
+	}
 }
 
 func TestRetentionZeroDisablesPurging(t *testing.T) {
