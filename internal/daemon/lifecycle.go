@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"syscall"
 	"time"
@@ -143,7 +144,11 @@ func Stop(home string) error {
 	if err != nil {
 		return Unpublish(home)
 	}
-	if !sys.alive(in.PID) {
+	// A record without a healthy daemon behind it is stale, not a target: after
+	// a reboot an unrelated process can inherit the recorded PID, and signaling
+	// it would kill something osm never started. healthy() is the same check
+	// Status/Ensure use, so "worth stopping" and "worth reusing" never diverge.
+	if !healthy(in) {
 		return Unpublish(home)
 	}
 	if err := sys.signal(in.PID, syscall.SIGTERM); err != nil {
@@ -153,7 +158,7 @@ func Stop(home string) error {
 	for sys.now().Before(deadline) {
 		sys.sleep(pollInterval)
 		_, rerr := readState(home)
-		if !sys.alive(in.PID) && rerr != nil {
+		if !sys.alive(in.PID) && errors.Is(rerr, os.ErrNotExist) {
 			return nil
 		}
 	}
