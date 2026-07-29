@@ -328,3 +328,34 @@ func TestRestartPreservesAddressesAndConfig(t *testing.T) {
 		t.Fatalf("restart did not preserve configuration: %+v", got[0])
 	}
 }
+
+func TestSpawnConfigArgsCarriesHistoryRetention(t *testing.T) {
+	cfg := SpawnConfig{Listen: "a:1", Dash: "b:2", HistoryRetention: "24h"}
+	want := []string{
+		"proxy", "--listen", "a:1", "--dashboard", "b:2", "--log-level", "info",
+		"--history-retention", "24h",
+	}
+	if got := cfg.args(); !slices.Equal(got, want) {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+	// Absent value means "let the spawned process apply its own default".
+	bare := SpawnConfig{Listen: "a:1", Dash: "b:2"}
+	if slices.Contains(bare.args(), "--history-retention") {
+		t.Fatalf("args = %v, want no --history-retention flag", bare.args())
+	}
+}
+
+func TestRestartPreservesHistoryRetention(t *testing.T) {
+	f := installFake(t)
+	f.writeState(home, Info{
+		PID: 10, ProxyAddr: "127.0.0.1:8787", DashAddr: "127.0.0.1:8788",
+		HistoryRetention: "24h",
+	})
+	if _, err := Restart(home, "pass"); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	got := f.spawns()
+	if len(got) != 1 || got[0].HistoryRetention != "24h" {
+		t.Fatalf("spawns = %+v, want HistoryRetention preserved", got)
+	}
+}
