@@ -199,18 +199,15 @@ func (f *fakeSys) events() []string {
 	return append([]string(nil), f.log...)
 }
 
-// spawns, setSpawnFn, and tickNow are unused until Tasks 3-5 add the
-// lifecycle operations and watch loop that call them; nolint is temporary,
-// same as the sys var in Task 1, and comes out with each task's first caller.
+// tickNow is unused until Task 5 adds the watch loop that calls it; nolint is
+// temporary, same as the sys var in Task 1, and comes out with its first caller.
 
-//nolint:unused // consumed starting in Task 3 (Ensure/Restart)
 func (f *fakeSys) spawns() []SpawnConfig {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]SpawnConfig(nil), f.spawned...)
 }
 
-//nolint:unused // consumed starting in Task 4 (respawn-on-death tests)
 func (f *fakeSys) setSpawnFn(fn func(*fakeSys, SpawnConfig) error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
