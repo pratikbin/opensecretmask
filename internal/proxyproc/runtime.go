@@ -20,6 +20,7 @@ import (
 
 	"github.com/pratikbin/opensecretmask/internal/dashboard"
 	"github.com/pratikbin/opensecretmask/internal/detect"
+	"github.com/pratikbin/opensecretmask/internal/history"
 	"github.com/pratikbin/opensecretmask/internal/mask"
 	"github.com/pratikbin/opensecretmask/internal/proxy"
 	"github.com/pratikbin/opensecretmask/internal/store"
@@ -61,6 +62,7 @@ type Runtime struct {
 	cfg       Config
 	logger    *slog.Logger
 	store     *store.Store
+	history   *history.Recorder
 	providers []proxy.Provider
 	pxy       *proxy.Server
 	dash      *dashboard.Server
@@ -159,6 +161,9 @@ func Start(ctx context.Context, cfg Config) (*Runtime, error) {
 	}
 	undo = append(undo, func() { _ = dashLn.Close() })
 
+	rec := history.NewRecorder(history.Config{Store: st, Logger: logger})
+	undo = append(undo, rec.Close)
+
 	dashSrv, err := dashboard.NewServer(st, logger)
 	if err != nil {
 		rollback()
@@ -168,7 +173,7 @@ func Start(ctx context.Context, cfg Config) (*Runtime, error) {
 		Providers: providers,
 		CA:        ca,
 		Masker:    m,
-		Store:     st,
+		History:   rec,
 		Logger:    logger,
 	})
 
@@ -180,7 +185,7 @@ func Start(ctx context.Context, cfg Config) (*Runtime, error) {
 	}
 
 	return &Runtime{
-		cfg: cfg, logger: logger, store: st, providers: providers,
+		cfg: cfg, logger: logger, store: st, history: rec, providers: providers,
 		pxy: pxy, dash: dashSrv, pxyLn: pxyLn, dashLn: dashLn,
 	}, nil
 }

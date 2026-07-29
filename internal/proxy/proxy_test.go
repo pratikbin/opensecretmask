@@ -15,6 +15,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/pratikbin/opensecretmask/internal/detect"
+	"github.com/pratikbin/opensecretmask/internal/history"
 	"github.com/pratikbin/opensecretmask/internal/mask"
 	"github.com/pratikbin/opensecretmask/internal/proxy"
 	"github.com/pratikbin/opensecretmask/internal/store"
@@ -72,15 +73,17 @@ func newProxyHarness(t *testing.T, upstream http.Handler, paths ...string) *prox
 	upstreamPool := x509.NewCertPool()
 	upstreamPool.AddCert(up.Certificate())
 
+	rec := history.NewRecorder(history.Config{Store: st})
 	srv := proxy.NewServer(proxy.Config{
 		Providers:   []proxy.Provider{{Host: upURL.Hostname(), Dialect: "anthropic", Paths: paths}},
 		CA:          ca,
 		Masker:      mask.NewMasker(st, det),
-		Store:       st,
+		History:     rec,
 		UpstreamTLS: &tls.Config{RootCAs: upstreamPool, MinVersion: tls.VersionTLS12},
 	})
 	proxySrv := httptest.NewServer(srv.Handler())
-	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) }) // runs LAST: drain logs after server closed
+	t.Cleanup(rec.Close)                                         // runs LAST: drain history writes before the store closes
+	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) }) // then stop the server
 	t.Cleanup(proxySrv.Close)                                    // runs FIRST: stop accepting requests
 
 	caPool := x509.NewCertPool()
@@ -228,16 +231,18 @@ func TestProxyTunnelsNonLLMHostUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCA: %v", err)
 	}
+	rec := history.NewRecorder(history.Config{Store: st})
 	// No providers configured -> nothing is intercepted.
 	srv := proxy.NewServer(proxy.Config{
 		Providers: []proxy.Provider{{Host: "api.anthropic.com", Dialect: "anthropic"}},
 		CA:        ca,
 		Masker:    mask.NewMasker(st, det),
-		Store:     st,
+		History:   rec,
 	})
 	proxySrv := httptest.NewServer(srv.Handler())
-	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) }) // runs LAST: drain logs after server closed
-	t.Cleanup(proxySrv.Close)                                    // runs FIRST: stop accepting requests
+	t.Cleanup(rec.Close)
+	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
+	t.Cleanup(proxySrv.Close)
 
 	proxyURL, _ := url.Parse(proxySrv.URL)
 	upPool := x509.NewCertPool()
