@@ -139,17 +139,30 @@ var ErrNoDaemon = errors.New("no daemon record")
 // "Gone" means both a dead PID and an absent record. A clean SIGTERM makes the
 // daemon remove its own record; without waiting for that, a following Ensure
 // would see the leftover entry and could mistake it for a live daemon.
+//
+// A record that is alive but not answering on its recorded address is the one
+// case Stop refuses to treat as idempotent success: it clears the record but
+// returns an error, because silently succeeding could leave a live daemon
+// still holding the port with nothing pointing at it.
 func Stop(home string) error {
 	in, err := readState(home)
 	if err != nil {
 		return Unpublish(home)
 	}
-	// A record without a healthy daemon behind it is stale, not a target: after
-	// a reboot an unrelated process can inherit the recorded PID, and signaling
-	// it would kill something osm never started. healthy() is the same check
-	// Status/Ensure use, so "worth stopping" and "worth reusing" never diverge.
-	if !healthy(in) {
+	if !sys.alive(in.PID) {
+		// Dead PID: unambiguously stale, clear it.
 		return Unpublish(home)
+	}
+	if !healthy(in) {
+		// Alive but not answering on the recorded address: either PID reuse
+		// after a reboot, or our own daemon in a bad moment. Signaling could
+		// kill a stranger; staying silent could orphan our daemon holding the
+		// port. Clear the record and say so, rather than let the caller spawn
+		// onto a port that may still be held.
+		_ = Unpublish(home)
+		return fmt.Errorf("daemon pid=%d recorded at %s is not answering; "+
+			"record cleared — verify nothing is still bound to %s before restarting",
+			in.PID, in.ProxyAddr, in.ProxyAddr)
 	}
 	if err := sys.signal(in.PID, syscall.SIGTERM); err != nil {
 		return fmt.Errorf("signal daemon pid=%d: %w", in.PID, err)
