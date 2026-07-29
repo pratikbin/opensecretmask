@@ -44,6 +44,7 @@ your home directory or run code as your OS user already has your secrets.
 - **Protected route**: proxied HTTP request bodies for exactly configured
   hosts (`proxy.DefaultProviders` + `--provider`) whose paths fall in the
   provider's masking scope (`Provider.Paths`; empty or `*` = every path).
+  Full provider/path/header detail lives in `docs/COVERAGE.md`.
 - Masking is byte-level find-and-replace over decoded JSON string leaves,
   with a raw-byte fallback for non-JSON bodies (`internal/mask/`).
 - The proxy **fails closed**: an unreadable or unmaskable request body is

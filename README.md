@@ -159,10 +159,11 @@ guarantee.
 - The local CA private key lives at `~/.opensecretmask/ca-key.pem` (mode
   `0600`). Anything that can read it could intercept your HTTPS traffic;
   treat it like any other private key.
-- Proxy and dashboard listeners default to loopback, but the listen-address
-  flags can override that default. A non-loopback proxy is an unauthenticated
-  general CONNECT proxy; a non-loopback dashboard exposes plaintext reveal
-  routes. Never bind either listener beyond loopback.
+- Proxy and dashboard listeners bind loopback only; non-loopback binds are
+  rejected at startup. `--allow-external-bind` overrides this as an explicit
+  operator choice: a non-loopback proxy is an unauthenticated general CONNECT
+  proxy and a non-loopback dashboard exposes plaintext reveal routes. Never
+  use it on a shared network.
 
 ## Limitations
 
@@ -175,13 +176,17 @@ guarantee.
 - Only traffic using the proxy and matching an intercepted host is protected.
   Out-of-scope paths are forwarded unmasked, and headers are never masked.
 - The dashboard has no authentication. Its reveal routes can return plaintext
-  originals; loopback is a deployment requirement, not an enforced invariant.
+  originals; loopback binding is enforced at startup unless explicitly
+  overridden with `--allow-external-bind`.
 
 ## Development
 
 Architecture deepening candidates, security prerequisites, and evidence are
 documented in
 [docs/architecture-review/](docs/architecture-review/README.md).
+
+The mechanical coverage contract (what traffic is masked, and what is
+deliberately not) lives in [docs/COVERAGE.md](docs/COVERAGE.md).
 
 ```sh
 make build             # go build -o osm ./cmd/osm
