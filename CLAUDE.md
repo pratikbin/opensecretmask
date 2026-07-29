@@ -12,6 +12,7 @@ the responses. Real credentials never reach the provider.
 | `internal/crypto` | AES-256-GCM + Argon2id key derivation |
 | `internal/daemon` | background-daemon lifecycle: record, health, serialized spawn, watch, stop, restart |
 | `internal/store` | encrypted SQLite (`modernc.org/sqlite`, no cgo) |
+| `internal/history` | request-history policy: capture cap, bounded admission, drop accounting, retention |
 | `internal/detect` | pluggable `Provider`s (builtin, llm, cloud, chat, git) + Shannon entropy |
 | `internal/mask` | format-preserving garble, masker, streaming unmasker |
 | `internal/proxy` | `goproxy` CA-MITM, route-by-host, request/response masking |
@@ -57,6 +58,17 @@ the responses. Real credentials never reach the provider.
   only when they fire — after both listeners bind, and after serving stops.
   The runtime never installs a signal handler; the CLI converts signals to
   cancellation at the process edge.
+- Request history is one module (`internal/history`), not a policy split three
+  ways. It owns the body cap, admission and drop accounting, record
+  construction, and retention. The proxy hands it an `Exchange`; the dashboard
+  reads its drop counter. Retention runs for as long as the process runs —
+  it is no longer a side effect of the dashboard being open.
+- Retention is `--history-retention` (default `168h`, `0` disables). Like every
+  spawn setting it is recorded in `proxy.pid` and reapplied on respawn and
+  restart.
+- Drop accounting is in-memory and process-local. `osm status` runs in a
+  separate process with no IPC to the daemon and cannot show it; the dashboard,
+  which runs inside the daemon, is the only surface.
 
 ## Performance design
 
@@ -66,8 +78,11 @@ Key constants and decisions (sized for LLM workloads with multi-PDF/image payloa
   bodies. Prevents OOM from adversarially large inputs while accommodating real
   multi-PDF + image payloads. Bodies exceeding the limit return HTTP 413 (requests)
   or are silently capped (responses stored for dashboard only).
-- `proxy.maxStoredBody = 256 KiB` — per-request body stored in the dashboard log.
-  Always `bytes.Clone`d from the read buffer so the multi-MB read buffer is freed.
+- `history.MaxBody = 256 KiB` — per-request body stored in the dashboard log.
+  `history.Capture` always `bytes.Clone`s from the read buffer so the multi-MB
+  read buffer is freed. It is called **synchronously** on the proxy's
+  request/response path; moving it into the recorder's async write would keep
+  the large buffer alive across the goroutine hop.
 - `Transport.MaxIdleConns = 200 / MaxIdleConnsPerHost = 100` — connection pool sized
   for concurrent LLM requests; `ResponseHeaderTimeout = 600 s` accommodates long
   chain-of-thought and agentic loops.
@@ -82,8 +97,12 @@ Key constants and decisions (sized for LLM workloads with multi-PDF/image payloa
 - `detect.findingMapPool` — `sync.Pool` for the per-`Scan` dedup map; `clear` + `Put` on
   exit avoids per-call allocations for the 139-rule map.
 - `mask.usedMapPool` — `sync.Pool` for the `map[int64]store.Secret` used in `MaskBody`.
-- `logExchange` DB write is async (goroutine + `context.Background()`) so SQLite latency
-  does not add to client-perceived response time.
+- `history.Recorder` write pool — 32 concurrent writes, admission by
+  non-blocking select. A saturated pool drops the newest record, counts it in
+  an atomic, and logs one line; the count is surfaced in the dashboard header.
+  Writes run on `context.Background()` so SQLite latency never adds to
+  client-perceived response time. `Recorder.Close` drains them, and the proxy
+  runtime calls it before closing the store.
 
 ## Future TODO
 
