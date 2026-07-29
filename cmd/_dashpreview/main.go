@@ -90,7 +90,7 @@ func main() {
 		}
 	}
 
-	srv, err := dashboard.NewServer(st, nil)
+	srv, err := dashboard.NewServer(st, nil, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
