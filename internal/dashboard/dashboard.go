@@ -17,18 +17,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/pratikbin/opensecretmask/internal/history"
 	"github.com/pratikbin/opensecretmask/internal/store"
 )
 
 //go:embed templates/*.html assets/*
 var content embed.FS
-
-// requestRetention is how long captured requests are kept before the dashboard
-// purges them — the masked bodies are debug data, not a permanent record.
-const requestRetention = 7 * 24 * time.Hour
 
 // recentRequestsLimit caps how many recent requests the list pane shows.
 const recentRequestsLimit = 200
@@ -38,17 +34,19 @@ const topSecretsLimit = 6
 
 // Server is the dashboard HTTP server.
 type Server struct {
-	store  *store.Store
-	tmpl   *template.Template
-	mux    *http.ServeMux
-	srv    *http.Server
-	logger *slog.Logger
-	done   chan struct{}
-	stop   sync.Once
+	store   *store.Store
+	history *history.Recorder
+	tmpl    *template.Template
+	mux     *http.ServeMux
+	srv     *http.Server
+	logger  *slog.Logger
 }
 
-// NewServer parses the embedded templates and wires the dashboard routes.
-func NewServer(st *store.Store, logger *slog.Logger) (*Server, error) {
+// NewServer parses the embedded templates and wires the dashboard routes. rec
+// may be nil; it is read only for the dropped-record count. Retention is not
+// the dashboard's business — the history recorder enforces it for as long as
+// the process runs, whether or not anyone has this page open.
+func NewServer(st *store.Store, rec *history.Recorder, logger *slog.Logger) (*Server, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
@@ -62,7 +60,7 @@ func NewServer(st *store.Store, logger *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{store: st, tmpl: tmpl, mux: http.NewServeMux(), logger: logger, done: make(chan struct{})}
+	s := &Server{store: st, history: rec, tmpl: tmpl, mux: http.NewServeMux(), logger: logger}
 	s.mux.HandleFunc("GET /{$}", s.handleHome)
 	s.mux.HandleFunc("GET /requests", s.handleHome)
 	s.mux.HandleFunc("GET /requests/{id}", s.handleRequest)
@@ -84,46 +82,15 @@ func NewServer(st *store.Store, logger *slog.Logger) (*Server, error) {
 // Handler returns the dashboard as an http.Handler.
 func (s *Server) Handler() http.Handler { return s.mux }
 
-// Serve runs the dashboard on ln until the listener is closed or Stop is
+// Serve runs the dashboard on ln until the listener is closed or Shutdown is
 // called. The caller binds ln so a bind failure surfaces synchronously.
 func (s *Server) Serve(ln net.Listener) error {
-	go s.purgeLoop()
 	return s.srv.Serve(ln)
 }
 
-// Shutdown gracefully stops the dashboard HTTP server and the purge loop.
+// Shutdown gracefully stops the dashboard HTTP server.
 func (s *Server) Shutdown(ctx context.Context) error {
-	s.Stop()
 	return s.srv.Shutdown(ctx)
-}
-
-// Stop signals purgeLoop to exit. Safe to call more than once.
-func (s *Server) Stop() { s.stop.Do(func() { close(s.done) }) }
-
-// purgeLoop drops requests older than requestRetention, once at startup and
-// hourly thereafter, until Stop is called.
-func (s *Server) purgeLoop() {
-	purge := func() {
-		n, err := s.store.PurgeRequestsOlderThan(context.Background(), requestRetention)
-		if err != nil {
-			s.logger.Error("purge old requests", "err", err)
-			return
-		}
-		if n > 0 {
-			s.logger.Info("purged old requests", "count", n, "retention", requestRetention.String())
-		}
-	}
-	purge()
-	t := time.NewTicker(time.Hour)
-	defer t.Stop()
-	for {
-		select {
-		case <-t.C:
-			purge()
-		case <-s.done:
-			return
-		}
-	}
 }
 
 // servePage renders a tab. An in-page htmx swap gets the bare #dash fragment;
@@ -200,6 +167,10 @@ type inspectorVM struct {
 	Providers  []providerCount
 	TopSecrets []store.SecretMeta
 	Detail     *detailVM
+	// Dropped is history discarded under write saturation, counted in this
+	// process. It is shown only when non-zero — a silent gap in the log would
+	// otherwise read as "nothing happened".
+	Dropped int64
 }
 
 // detailVM is the right-pane content for one request.
@@ -240,6 +211,7 @@ func (s *Server) buildInspectorVM(ctx context.Context) (*inspectorVM, error) {
 		Requests:   rows,
 		Providers:  providerCountsFrom(rows),
 		TopSecrets: secrets,
+		Dropped:    s.history.Dropped(),
 	}, nil
 }
 

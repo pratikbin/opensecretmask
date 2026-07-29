@@ -30,7 +30,7 @@ func newTestServer(t *testing.T) (*dashboard.Server, *store.Store) {
 	if err := st.InitCrypto(t.Context(), "pass"); err != nil {
 		t.Fatalf("InitCrypto: %v", err)
 	}
-	srv, err := dashboard.NewServer(st, nil)
+	srv, err := dashboard.NewServer(st, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -176,8 +176,9 @@ func TestDashboardBadRequestID(t *testing.T) {
 	}
 }
 
-// TestDashboardServeShutdown verifies that Serve + Shutdown terminates cleanly
-// with no goroutine leaks (purgeLoop must exit via the done channel).
+// TestDashboardServeShutdown verifies that Serve + Shutdown terminates
+// cleanly. Retention no longer runs here — the history recorder owns it — so
+// this is purely an HTTP-server lifecycle check.
 func TestDashboardServeShutdown(t *testing.T) {
 	srv, _ := newTestServer(t)
 
@@ -197,5 +198,20 @@ func TestDashboardServeShutdown(t *testing.T) {
 
 	if err := <-serveErr; err != http.ErrServerClosed {
 		t.Fatalf("Serve returned %v, want http.ErrServerClosed", err)
+	}
+}
+
+// TestDashboardHidesDroppedCountWhenZero asserts the Dropped stat block stays
+// hidden while the recorder has dropped nothing. The recorder's semaphore is
+// unexported, so an external test cannot force a drop — the zero case is
+// checked here and drop counting is covered by internal/history's own test.
+func TestDashboardHidesDroppedCountWhenZero(t *testing.T) {
+	srv, _ := newTestServer(t)
+	code, body := get(t, srv.Handler(), "/")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if strings.Contains(body, "Dropped") {
+		t.Error("the Dropped block rendered with a zero counter")
 	}
 }

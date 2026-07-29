@@ -164,7 +164,7 @@ func Start(ctx context.Context, cfg Config) (*Runtime, error) {
 	rec := history.NewRecorder(history.Config{Store: st, Logger: logger})
 	undo = append(undo, rec.Close)
 
-	dashSrv, err := dashboard.NewServer(st, logger)
+	dashSrv, err := dashboard.NewServer(st, rec, logger)
 	if err != nil {
 		rollback()
 		return nil, err
