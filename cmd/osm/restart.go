@@ -53,7 +53,7 @@ func restartCmd() *cobra.Command {
 				return err
 			}
 
-			opts := daemonOpts{extra: p.Extra, entropy: p.Entropy, logLevel: p.LogLevel}
+			opts := daemonOpts{extra: p.Extra, entropy: p.Entropy, logLevel: p.LogLevel, allowExternal: p.AllowExternal}
 			if opts.logLevel == "" {
 				opts.logLevel = "info"
 			}
