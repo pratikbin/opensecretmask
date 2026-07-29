@@ -215,6 +215,4 @@ func (f *fakeSys) setSpawnFn(fn func(*fakeSys, SpawnConfig) error) {
 }
 
 // tickNow fires one supervision tick.
-//
-//nolint:unused // consumed starting in Task 5 (Watch)
 func (f *fakeSys) tickNow() { f.tick <- time.Time{} }
