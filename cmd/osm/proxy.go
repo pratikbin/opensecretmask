@@ -97,7 +97,7 @@ func proxyCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&entropy, "detect-entropy", false, "also mask high-entropy tokens (may over-mask)")
 	cmd.Flags().StringVar(&logLevel, "log-level", "info", "log verbosity: debug, info, warn, error")
 	cmd.Flags().BoolVar(&allowExternal, "allow-external-bind", false,
-		"permit binding a non-loopback address (exposes the proxy and dashboard to the network)")
+		"allow --listen/--dashboard to bind non-loopback addresses (dangerous: unauthenticated proxy and reveal routes)")
 	return cmd
 }
 

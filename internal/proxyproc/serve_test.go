@@ -97,7 +97,9 @@ func TestServeIsUsableAfterStoreCloses(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = rt.Serve(canceled())
+		// Live context, never cancelled: this is the case the stopped channel
+		// exists for. Before it, Serve's drain goroutine blocked forever here.
+		_ = rt.Serve(context.Background())
 	}()
 	select {
 	case <-done:
