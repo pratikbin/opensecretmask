@@ -74,9 +74,12 @@ func (r *Runtime) Serve(ctx context.Context) error {
 	serveErr := g.Wait()
 
 	// Teardown mirrors Start: the record goes first so no one discovers a
-	// dying daemon, then the store. Listener closure is Shutdown's job.
+	// dying daemon, then history writes drain, then the store closes. The
+	// order matters — a history write landing on a closed store has nowhere
+	// to report the failure. Listener closure is Shutdown's job.
 	if r.cfg.Unpublish != nil {
 		r.cfg.Unpublish()
 	}
+	r.history.Close()
 	return errors.Join(serveErr, r.store.Close())
 }

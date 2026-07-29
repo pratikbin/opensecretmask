@@ -16,6 +16,7 @@ import (
 
 	"github.com/elazarl/goproxy"
 
+	"github.com/pratikbin/opensecretmask/internal/history"
 	"github.com/pratikbin/opensecretmask/internal/mask"
 	"github.com/pratikbin/opensecretmask/internal/store"
 )
@@ -100,22 +101,22 @@ var DefaultProviders = []Provider{
 
 // Config configures a proxy Server.
 type Config struct {
-	Providers   []Provider
-	CA          *CA
-	Masker      *mask.Masker
-	Store       *store.Store
+	Providers []Provider
+	CA        *CA
+	Masker    *mask.Masker
+	// History records proxied exchanges for the dashboard. Nil discards them;
+	// the proxy never blocks on it.
+	History     *history.Recorder
 	UpstreamTLS *tls.Config // upstream verification; nil verifies via system roots
 	Logger      *slog.Logger
 }
 
 // Server is the CA-MITM masking proxy.
 type Server struct {
-	cfg    Config
-	proxy  *goproxy.ProxyHttpServer
-	hosts  map[string]hostRule // bare host -> interception rule
-	srv    *http.Server
-	logSem chan struct{}  // bounded semaphore: max concurrent log goroutines
-	logWg  sync.WaitGroup // tracks in-flight log goroutines for drain on shutdown
+	cfg   Config
+	proxy *goproxy.ProxyHttpServer
+	hosts map[string]hostRule // bare host -> interception rule
+	srv   *http.Server
 }
 
 // exchange carries per-request state from the request handler to the response
@@ -130,22 +131,10 @@ type exchange struct {
 	respBody []byte
 }
 
-// maxStoredBody caps the bytes persisted per captured body, keeping the
-// request log from bloating on long conversations.
-const maxStoredBody = 256 << 10
-
 // maxRequestBody caps the request and response bodies read into memory.
 // LLM payloads can carry multiple PDFs and images; 512 MiB accommodates
 // them while preventing OOM from adversarially large bodies.
 const maxRequestBody = 512 << 20 // 512 MiB
-
-// capBody truncates b to maxStoredBody for storage.
-func capBody(b []byte) []byte {
-	if len(b) > maxStoredBody {
-		b = b[:maxStoredBody]
-	}
-	return bytes.Clone(b)
-}
 
 // compilePaths turns a provider's path patterns into compiled regexps. An
 // empty list, or any "*" entry, yields nil — meaning every path is masked. An
@@ -222,7 +211,6 @@ func NewServer(cfg Config) *Server {
 	proxy.OnResponse().DoFunc(s.onResponse)
 
 	s.proxy = proxy
-	s.logSem = make(chan struct{}, 32)
 	// WriteTimeout is left at 0: proxy responses include long-lived SSE
 	// streams that a short write deadline would sever.
 	s.srv = &http.Server{
@@ -246,13 +234,13 @@ func (s *Server) Serve(ln net.Listener) error {
 }
 
 // Shutdown gracefully drains in-flight requests and stops the proxy.
+// History writes are drained separately by the recorder's Close, which the
+// process runtime calls before the store closes.
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s.srv == nil {
 		return nil
 	}
-	err := s.srv.Shutdown(ctx)
-	s.logWg.Wait() // drain in-flight log writes before store closes
-	return err
+	return s.srv.Shutdown(ctx)
 }
 
 func (s *Server) onRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
@@ -300,7 +288,7 @@ func (s *Server) onRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Requ
 		masked = preserveOpaqueBlocks(body, masked)
 	}
 	ex.used = used
-	ex.reqBody = capBody(masked)
+	ex.reqBody = history.Capture(masked)
 	req.Body = io.NopCloser(bytes.NewReader(masked))
 	req.ContentLength = int64(len(masked))
 	req.Header.Del("Content-Length")
@@ -335,7 +323,7 @@ func (s *Server) onResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Re
 				resp.ContentLength = -1
 				resp.Header.Del("Content-Length")
 			} else {
-				ex.respBody = capBody(body)
+				ex.respBody = history.Capture(body)
 				unmasked := s.cfg.Masker.UnmaskBody(body, ex.used)
 				resp.Body = io.NopCloser(bytes.NewReader(unmasked))
 				resp.ContentLength = int64(len(unmasked))
@@ -353,33 +341,23 @@ func (s *Server) logExchange(ctx *goproxy.ProxyCtx, ex *exchange, status int, ss
 		ids = append(ids, sec.ID)
 	}
 	dur := time.Since(ex.start)
-	rec := store.RequestRecord{
-		Provider:   ex.dialect,
-		Host:       ex.host,
-		Method:     ctx.Req.Method,
-		Path:       ctx.Req.URL.Path,
-		Status:     status,
-		SSE:        sse,
-		Masked:     len(ex.used),
-		DurationMS: dur.Milliseconds(),
-		ReqBody:    ex.reqBody,
-		RespBody:   ex.respBody,
+	hx := history.Exchange{
+		Provider:  ex.dialect,
+		Host:      ex.host,
+		Method:    ctx.Req.Method,
+		Path:      ctx.Req.URL.Path,
+		Status:    status,
+		SSE:       sse,
+		Masked:    len(ex.used),
+		Duration:  dur,
+		ReqBody:   ex.reqBody,
+		RespBody:  ex.respBody,
+		SecretIDs: ids,
 	}
 	if ctx.Error != nil {
-		rec.ErrMsg = ctx.Error.Error()
+		hx.ErrMsg = ctx.Error.Error()
 	}
-	select {
-	case s.logSem <- struct{}{}:
-		s.logWg.Go(func() {
-			defer func() { <-s.logSem }()
-			if _, err := s.cfg.Store.LogRequest(context.Background(), rec, ids); err != nil {
-				s.cfg.Logger.Error("log request to store", "err", err)
-			}
-		})
-	default:
-		s.cfg.Logger.Warn("log queue full, dropping request log",
-			"host", ex.host, "path", ctx.Req.URL.Path)
-	}
+	s.cfg.History.Record(hx)
 
 	attrs := make([]any, 0, 10)
 	attrs = append(attrs,
