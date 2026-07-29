@@ -100,7 +100,6 @@ var DefaultProviders = []Provider{
 
 // Config configures a proxy Server.
 type Config struct {
-	Listen      string
 	Providers   []Provider
 	CA          *CA
 	Masker      *mask.Masker
@@ -237,19 +236,11 @@ func NewServer(cfg Config) *Server {
 // Handler returns the proxy as an http.Handler.
 func (s *Server) Handler() http.Handler { return s.proxy }
 
-// ListenAndServe runs the proxy on cfg.Listen until the process exits or
-// Shutdown is called.
-func (s *Server) ListenAndServe() error {
-	ln, err := net.Listen("tcp", s.cfg.Listen)
-	if err != nil {
-		return err
-	}
-	return s.Serve(ln)
-}
-
 // Serve runs the proxy on an already-bound listener until Shutdown is called.
 // It lets the caller pick the socket — and read the chosen address — before the
-// server starts, which ListenAndServe cannot do for an ephemeral (:0) port.
+// server starts. Binding is the caller's responsibility: cmd/osm enforces the
+// loopback guard (validateListenAddr) before calling net.Listen and handing
+// the listener here.
 func (s *Server) Serve(ln net.Listener) error {
 	return s.srv.Serve(ln)
 }

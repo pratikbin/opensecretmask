@@ -28,7 +28,8 @@ type pidInfo struct {
 	DashAddr  string    `json:"dash_addr"`
 	StartedAt time.Time `json:"started_at"`
 	// Spawn config — preserved across 'osm restart' so a fresh binary
-	// comes back up with the same providers / entropy / log level.
+	// comes back up with the same providers / entropy / log level /
+	// allow-external bind policy.
 	Extra         []string `json:"extra,omitempty"`
 	Entropy       bool     `json:"entropy,omitempty"`
 	LogLevel      string   `json:"log_level,omitempty"`
