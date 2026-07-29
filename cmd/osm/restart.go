@@ -20,9 +20,9 @@ func restartCmd() *cobra.Command {
 		Short: "Stop the running daemon and respawn it with the current binary",
 		Long: "Sends SIGTERM to the running daemon, waits for clean exit, then\n" +
 			"respawns with the same listen / dashboard / provider / entropy /\n" +
-			"log-level config preserved in proxy.pid. Use after rebuilding the\n" +
-			"binary to pick up changes (dashboard tweaks, new detection rules)\n" +
-			"without losing the daemon's spawn configuration.\n\n" +
+			"log-level / allow-external bind policy preserved in proxy.pid. Use\n" +
+			"after rebuilding the binary to pick up changes (dashboard tweaks,\n" +
+			"new detection rules) without losing the daemon's spawn configuration.\n\n" +
 			"Requires $OSM_KEY in the environment (or a TTY for the prompt) —\n" +
 			"the fresh daemon must re-unlock the store.",
 		Args: cobra.NoArgs,
