@@ -77,6 +77,14 @@ func (r *Runtime) Serve(ctx context.Context) error {
 	// dying daemon, then history writes drain, then the store closes. The
 	// order matters — a history write landing on a closed store has nowhere
 	// to report the failure. Listener closure is Shutdown's job.
+	//
+	// Shutdown's drain only waits on http.Server's own tracked connections.
+	// A CONNECT tunnel is hijacked out of that tracking once established, so
+	// an in-flight MITM'd request on a hijacked tunnel can still be masking
+	// through the store after this point. That write then races store.Close
+	// below. It fails closed (a write on a closed *sql.DB just errors) with
+	// no corruption or leak, so this is left unhandled rather than adding a
+	// second drain mechanism for tunnels goproxy doesn't expose a hook for.
 	if r.cfg.Unpublish != nil {
 		r.cfg.Unpublish()
 	}
