@@ -304,6 +304,7 @@ func (s *Store) TouchSecrets(ctx context.Context, ids []int64) error {
 		args = append(args, id)
 	}
 	_, err := s.db.ExecContext(ctx,
+		// #nosec G202 -- placeholders is built only from literal '?' and ',' runes above, never from ids; values are bound via args
 		"UPDATE secrets SET hits = hits + 1, last_used = ? WHERE id IN ("+string(placeholders)+")",
 		args...)
 	return err
