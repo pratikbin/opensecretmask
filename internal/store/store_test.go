@@ -59,9 +59,36 @@ func TestOpenCreatesFileMode0600(t *testing.T) {
 	}
 	defer func() { _ = s.Close() }()
 
-	// Includes the -wal/-shm sidecar files: SQLite creates them on first
-	// write inheriting the main file's mode at that moment, so this also
-	// guards the chmod-before-first-write ordering in store.Open.
+	assertMode0600(t, path)
+}
+
+// TestOpenFixesPreExistingSidecarMode covers upgrading an install created by
+// a pre-fix binary: the main file and its -wal/-shm sidecars already exist
+// at sqlite's old default mode before Open runs.
+func TestOpenFixesPreExistingSidecarMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX file mode bits don't apply on windows")
+	}
+	path := filepath.Join(t.TempDir(), "test.db")
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.WriteFile(path+suffix, nil, 0o644); err != nil {
+			t.Fatalf("seed %s%s: %v", path, suffix, err)
+		}
+	}
+
+	s, err := store.Open(t.Context(), path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	assertMode0600(t, path)
+}
+
+func assertMode0600(t *testing.T, path string) {
+	t.Helper()
+	// Includes the -wal/-shm sidecar files: sqlite doesn't propagate one
+	// file's mode to another, so store.Open must chmod each individually.
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		info, err := os.Stat(path + suffix)
 		if err != nil {
