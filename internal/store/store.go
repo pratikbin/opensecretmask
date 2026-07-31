@@ -69,20 +69,24 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
-	// PingContext above is what creates the file; sqlite's own default mode
-	// (0644, subject to umask) exposes it to other local users. Secret values
-	// are AES-encrypted, but masks and request/response bodies are not, so
-	// tighten the mode here rather than relying on the $OPENSECRETMASK_HOME
-	// directory mode alone. Must happen before the first write below: SQLite
-	// creates the -wal/-shm sidecar files at that point inheriting the main
-	// file's current mode, so chmod'ing after would leave them at 0644.
-	if err := os.Chmod(path, 0o600); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("store: chmod %s: %w", path, err)
-	}
 	if _, err := db.ExecContext(ctx, schema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("store: schema: %w", err)
+	}
+	// PingContext creates the main file, and the schema write above creates
+	// its -wal/-shm sidecars (journal_mode is WAL); sqlite's default mode
+	// for all three (0644, subject to umask) exposes them to other local
+	// users. Secret values are AES-encrypted, but masks and request/response
+	// bodies are not, so tighten every file that exists rather than relying
+	// on the $OPENSECRETMASK_HOME directory mode alone. Each path is chmod'd
+	// individually — sqlite never propagates one file's mode to another —
+	// and re-running this on an already-0600 store (or one carrying sidecar
+	// files left behind by a pre-fix binary) is a harmless no-op/self-heal.
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Chmod(p, 0o600); err != nil && !os.IsNotExist(err) {
+			_ = db.Close()
+			return nil, fmt.Errorf("store: chmod %s: %w", p, err)
+		}
 	}
 	migrate(ctx, db)
 	// One encoder and one decoder per Store; both are safe for concurrent
