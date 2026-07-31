@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -67,6 +68,17 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
+	}
+	// PingContext above is what creates the file; sqlite's own default mode
+	// (0644, subject to umask) exposes it to other local users. Secret values
+	// are AES-encrypted, but masks and request/response bodies are not, so
+	// tighten the mode here rather than relying on the $OPENSECRETMASK_HOME
+	// directory mode alone. Must happen before the first write below: SQLite
+	// creates the -wal/-shm sidecar files at that point inheriting the main
+	// file's current mode, so chmod'ing after would leave them at 0644.
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("store: chmod %s: %w", path, err)
 	}
 	if _, err := db.ExecContext(ctx, schema); err != nil {
 		_ = db.Close()

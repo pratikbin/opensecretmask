@@ -2,7 +2,9 @@ package store_test
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"go.uber.org/goleak"
@@ -43,6 +45,31 @@ func TestInitAndUnlock(t *testing.T) {
 	}
 	if err := s.InitCrypto(t.Context(), "again"); err == nil {
 		t.Fatal("InitCrypto on an initialized db should fail")
+	}
+}
+
+func TestOpenCreatesFileMode0600(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX file mode bits don't apply on windows")
+	}
+	path := filepath.Join(t.TempDir(), "test.db")
+	s, err := store.Open(t.Context(), path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	// Includes the -wal/-shm sidecar files: SQLite creates them on first
+	// write inheriting the main file's mode at that moment, so this also
+	// guards the chmod-before-first-write ordering in store.Open.
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		info, err := os.Stat(path + suffix)
+		if err != nil {
+			t.Fatalf("Stat(%s): %v", suffix, err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Fatalf("%s%s mode = %o, want 0600", path, suffix, got)
+		}
 	}
 }
 
