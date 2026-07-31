@@ -218,12 +218,17 @@ Or directly:
 ```sh
 go build ./cmd/osm
 go test ./...
-golangci-lint run ./... && gosec ./... && govulncheck ./...
+golangci-lint run ./... && gosec -exclude-dir=.agents -exclude-dir=.recovered2 ./... && go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 ```
 
 CI pipeline is in `.github/workflows/ci.yml` (build/test/lint/security jobs + weekly scheduled govulncheck).
 
-- Go toolchain is pinned in `.tool-versions` (asdf).
+- Go toolchain is pinned in `.tool-versions` (asdf). `govulncheck` is invoked via
+  `go run golang.org/x/vuln/cmd/govulncheck@<version>` rather than an asdf-managed
+  binary, since no asdf plugin for it is guaranteed to exist.
+- `gosec` doesn't follow Go's convention of skipping dot-prefixed directories, so
+  it needs `-exclude-dir=.agents -exclude-dir=.recovered2` to avoid scanning the
+  gitignored skill-asset examples and recovered-code snapshot.
 - `.golangci.yml` uses **golangci-lint v2 schema** with the `modernize` linter enabled.
   Requires golangci-lint v2.6.0+: `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`.
 - The dashboard CSS (`internal/dashboard/assets/dashboard.css`) is a committed,
