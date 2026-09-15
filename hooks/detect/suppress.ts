@@ -15,7 +15,10 @@
  * nothing.
  */
 const PUBLIC_PREFIX =
-  /^(?:price|prod|cus|sub|sched|in|ch|pi|cs|py|re|txn|il|si|seti|evt|acct|promo|coupon|plan|card|ba|src|dp|du|iv|ii|rcpt|file|link|pm|tok|pk|test|toolu|msg|req|run|wf)_/i
+  /^(?:price|prod|cus|sub|sched|in|ch|pi|cs|py|re|txn|il|si|seti|evt|acct|promo|coupon|plan|card|ba|src|dp|du|iv|ii|rcpt|file|link|pm|tok|test|toolu|msg|req|run|wf)_/i
+
+/** Stripe's publishable key: public by design, printed in client-side source. */
+const PUBLISHABLE = /^pk_(?:live|test)_/i
 
 /** Public ids identified by shape rather than prefix: YouTube channel and playlist. */
 const PUBLIC_SHAPE = /^(?:UC[A-Za-z0-9_-]{22}|PL[A-Za-z0-9_-]{16,32})$/
@@ -51,12 +54,16 @@ function alphabetWidth(token: string): number {
  * even though a bare 40-hex run is usually a commit id.
  */
 export function isSuppressed(token: string, before: string): boolean {
-  const named = NAMED.test(before.slice(-LOOKBEHIND))
+  // Stripe's publishable key is public by definition, so it stays suppressed
+  // even under a credential name. It is the one documented exception.
+  if (PUBLISHABLE.test(token)) return true
 
-  // A public object id is public whatever sits to its left.
+  // The general rule outranks the enumerated one. Put the prefix list first
+  // and every addition to it permanently subtracts from the signal that
+  // actually generalises, which is how such a list grows without end.
+  if (NAMED.test(before.slice(-LOOKBEHIND))) return false
+
   if (PUBLIC_PREFIX.test(token) || PUBLIC_SHAPE.test(token)) return true
-
-  if (named) return false
 
   if (DIGITS_ONLY.test(token)) return true
   if (UUID.test(token)) return true

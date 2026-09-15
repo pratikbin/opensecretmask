@@ -1,59 +1,63 @@
-// Failing closed on a slow hook.
+// Failing closed without blaming the wrong party.
 //
-// The engine skips a hook that throws OR overruns its time budget, and runs
-// core in its place. For most plugins that is a sensible default. For a
-// masking hook it is the worst possible outcome: being skipped means the
-// unmasked content goes straight to the model, so a slow hook is strictly
-// worse than no hook at all.
+// The engine skips a hook that throws OR overruns its budget and runs core in
+// its place. For a masking hook that is the worst outcome: being skipped means
+// the unmasked content goes straight to the model. So a hook must answer for
+// itself rather than let the engine answer for it.
 //
-// A local try/catch cannot help, because a timeout is not an exception this
-// code ever sees. So the hook polices itself: it races its own work against a
-// shorter deadline and RETURNS a deny before the engine's skip can fire. A
-// deny is a visible, safe failure. Being skipped is an invisible, unsafe one.
+// The subtlety that cost us once: the deadline must cover OUR work only, never
+// a `next()` call. Wrapping `next()` charges every hook beneath us and the
+// engine's own work to our budget, so a slow unrelated plugin makes osm drop
+// the user's prompt with a message blaming osm. Masking is string replacement
+// measured in microseconds; if it ever takes seconds, that is our bug.
+//
+// Synchronous work cannot overrun a timer it blocks, so `guard` is a plain
+// try/catch. `guardAsync` adds a real deadline for the rare async case, and
+// takes an AbortSignal so the host-side timer ends with the dispatch instead
+// of parking for the full window.
 
 /** Our deadline, comfortably inside the engine's own. */
 export const BUDGET_MS = 8_000
 
-/** A wait, supplied by the caller. In a hook that is `$.clock.sleep`. */
-export type Sleep = (ms: number) => Promise<void>
+/** A cancellable wait. In a hook that is `$.clock.sleep`. */
+export type Sleep = (ms: number, options?: { signal?: AbortSignal }) => Promise<void>
 
 const EXPIRED = Symbol('osm.expired')
 
 /**
- * Runs `work`, and if it has not settled within `ms`, resolves `onTimeout()`.
+ * Runs `work` and falls back to `onFailure()` if it throws.
  *
- * The losing promise is left to settle on its own. It cannot be cancelled and
- * its result is discarded.
+ * For the synchronous masking calls, which is all of them today. `work` must
+ * not call `next()`.
  */
-export async function withBudget<T>(
-  work: Promise<T>,
-  onTimeout: () => T,
-  sleep: Sleep,
-  ms: number = BUDGET_MS,
-): Promise<T> {
-  const expired = sleep(ms).then(() => EXPIRED)
-  const winner = await Promise.race([work, expired])
-  return winner === EXPIRED ? onTimeout() : (winner as T)
+export function guard<T>(work: () => T, onFailure: () => T): T {
+  try {
+    return work()
+  } catch {
+    return onFailure()
+  }
 }
 
 /**
  * Runs `work` and falls back to `onFailure()` on a throw or an overrun.
  *
- * With no `sleep` it degrades to a plain try/catch, which still covers the
- * throwing case. Every hook passes `$.clock.sleep` so the overrun case is
- * covered too.
+ * `work` must not call `next()`; see the note at the top of this file. The
+ * losing wait is aborted, so no host-side timer outlives the dispatch.
  */
-export async function guard<T>(
+export async function guardAsync<T>(
   work: () => Promise<T>,
   onFailure: () => T,
-  sleep?: Sleep,
+  sleep: Sleep,
   ms: number = BUDGET_MS,
 ): Promise<T> {
+  const abort = new AbortController()
   try {
-    const running = work()
-    if (!sleep) return await running
-    return await withBudget(running, onFailure, sleep, ms)
+    const expired = sleep(ms, { signal: abort.signal }).then(() => EXPIRED)
+    const winner = await Promise.race([work(), expired])
+    return winner === EXPIRED ? onFailure() : (winner as T)
   } catch {
     return onFailure()
+  } finally {
+    abort.abort()
   }
 }

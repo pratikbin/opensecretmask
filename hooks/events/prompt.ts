@@ -16,42 +16,35 @@ const DROP =
  * `prompt.section`  the named sections of the system prompt, `memory` among
  *                   them.
  *
- * Each falls closed on its own: a prompt that cannot be masked is dropped, and
- * a section that cannot be masked is emptied rather than sent through.
+ * Each guards only its own masking. Wrapping the `next()` call instead would
+ * charge every hook beneath us to our budget and drop the user's prompt when
+ * some other plugin is slow.
  */
 export function registerPrompt(on: On, vault: Vault) {
-  on('prompt.submit', async ($, e, next) =>
-    guard(
-      () =>
-        next({
-          ...e,
-          text: vault.mask(e.text),
-          context: e.context?.map((block) => vault.mask(block)),
-        }),
-      () => ({ drop: DROP }),
-      $.clock.sleep,
-    ),
-  )
+  on('prompt.submit', ($, e, next) => {
+    const masked = guard(
+      () => ({
+        text: vault.mask(e.text),
+        context: e.context?.map((block) => vault.mask(block)),
+      }),
+      () => undefined,
+    )
+    return masked === undefined ? { drop: DROP } : next({ ...e, ...masked })
+  })
 
-  on('prompt.context', async ($, e, next) =>
-    guard(
-      async () => {
-        const { blocks } = await next(e)
-        return { blocks: blocks.map((b) => ({ ...b, text: vault.mask(b.text) })) }
-      },
+  on('prompt.context', async ($, e, next) => {
+    const { blocks } = await next(e)
+    return guard(
+      () => ({ blocks: blocks.map((b) => ({ ...b, text: vault.mask(b.text) })) }),
       () => ({ blocks: [] }),
-      $.clock.sleep,
-    ),
-  )
+    )
+  })
 
-  on('prompt.section', async ($, e, next) =>
-    guard(
-      async () => {
-        const { text } = await next(e)
-        return { text: typeof text === 'string' ? vault.mask(text) : text }
-      },
+  on('prompt.section', async ($, e, next) => {
+    const { text } = await next(e)
+    return guard(
+      () => ({ text: typeof text === 'string' ? vault.mask(text) : text }),
       () => ({ text: null }),
-      $.clock.sleep,
-    ),
-  )
+    )
+  })
 }
