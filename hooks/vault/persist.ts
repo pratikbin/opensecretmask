@@ -18,8 +18,6 @@
 //
 // Off unless `persist` is set. When it is off nothing is written at all.
 
-import type { EngineInterface } from 'claude-code'
-
 import { parseEnv } from '../env'
 
 export type EnvEntry = {
@@ -47,19 +45,17 @@ export type Snapshot = {
   entries: Entry[]
 }
 
-/** The slice of the engine this module needs, named so tests can supply it. */
+/**
+ * The slice of the engine this module needs, named so tests can supply it.
+ *
+ * Each caller builds it from its own `$`. The engine's hook validator follows
+ * `$` only inside one file, so an adapter living here would fail validation.
+ */
 export type PersistPort = {
   get: (key: string) => Promise<unknown>
   set: (key: string, value: unknown) => Promise<void>
   readFile: (path: string) => Promise<string>
 }
-
-/** The adapter from `$`, kept beside the type it satisfies. */
-export const portOf = ($: EngineInterface): PersistPort => ({
-  get: (key) => $.store.get(key),
-  set: (key, value) => $.store.set(key, value),
-  readFile: (path) => $.fs.read(path),
-})
 
 export const STORE_KEY = 'osm.vault.v1'
 
