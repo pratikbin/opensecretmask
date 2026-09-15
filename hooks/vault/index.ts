@@ -1,4 +1,4 @@
-import { literalPrefixLen, scan, DEFAULT_DETECT, type DetectConfig } from '../detect'
+import { literalPrefixLen, scanValues, DEFAULT_DETECT, type DetectConfig } from '../detect'
 import { MIN_SECRET_LEN } from '../env'
 
 import { garble } from './garble'
@@ -6,15 +6,13 @@ import type { Entry } from './persist'
 import { walk } from './walk'
 
 export { garble } from './garble'
-export { walk, SKIP_KEYS, MAX_DEPTH, MAX_STRING } from './walk'
+export { walk, isOpaque, MAX_DEPTH, MAX_STRING } from './walk'
 export * from './persist'
 
 const GARBLE_TRIES = 8
 
-/** Where a secret came from, which decides how it may be persisted. */
-export type Origin =
-  | { kind: 'env'; file: string; key: string }
-  | { kind: 'literal' }
+/** Where a secret came from. Absent means it exists nowhere but this process. */
+export type EnvSource = { file: string; key: string }
 
 /**
  * The two-way map between a secret and its fake.
@@ -26,8 +24,15 @@ export type Origin =
 export class Vault {
   readonly #bySecret = new Map<string, string>()
   readonly #byMask = new Map<string, string>()
-  readonly #origin = new Map<string, Origin>()
-  #substitutions = 0
+  readonly #envSource = new Map<string, EnvSource>()
+
+  // Both directions scan longest-first so a value containing another is
+  // substituted whole. Sorting per call meant sorting the whole key set once
+  // per string in every tool result; the maps only ever grow, so caching and
+  // clearing on insert gives the same order for the cost of one sort per new
+  // secret.
+  #secretsByLength: string[] | undefined
+  #masksByLength: string[] | undefined
 
   constructor(private readonly cfg: DetectConfig = DEFAULT_DETECT) {}
 
@@ -35,13 +40,11 @@ export class Vault {
     return this.#bySecret.size
   }
 
-  get substitutions(): number {
-    return this.#substitutions
-  }
-
-  /** Whether `value` is a fake this vault minted or adopted. */
-  isMask(value: string): boolean {
-    return this.#byMask.has(value)
+  #remember(secret: string, fake: string): void {
+    this.#bySecret.set(secret, fake)
+    this.#byMask.set(fake, secret)
+    this.#secretsByLength = undefined
+    this.#masksByLength = undefined
   }
 
   /**
@@ -50,11 +53,10 @@ export class Vault {
    * Used only by the persistence layer on load. A pair whose fake already
    * resolves is ignored, so a live mapping always beats a stored one.
    */
-  adopt(fake: string, secret: string, origin: Origin): void {
+  adopt(fake: string, secret: string, source?: EnvSource): void {
     if (this.#byMask.has(fake) || this.#bySecret.has(secret)) return
-    this.#bySecret.set(secret, fake)
-    this.#byMask.set(fake, secret)
-    this.#origin.set(secret, origin)
+    this.#remember(secret, fake)
+    if (source) this.#envSource.set(secret, source)
   }
 
   /**
@@ -63,9 +65,9 @@ export class Vault {
    * This is the exact-match layer: a registered value is masked wherever it
    * appears, whether or not a rule recognises its shape.
    */
-  register(secret: string, origin: Origin = { kind: 'literal' }): void {
+  register(secret: string, source?: EnvSource): void {
     if (secret.length < MIN_SECRET_LEN || this.#byMask.has(secret)) return
-    this.#origin.set(secret, origin)
+    if (source) this.#envSource.set(secret, source)
     this.maskOf(secret)
   }
 
@@ -93,9 +95,7 @@ export class Vault {
       fake = `[MASKED-${(this.#bySecret.size + 1).toString(16).padStart(4, '0')}]`
     }
 
-    this.#bySecret.set(secret, fake)
-    this.#byMask.set(fake, secret)
-    if (!this.#origin.has(secret)) this.#origin.set(secret, { kind: 'literal' })
+    this.#remember(secret, fake)
     return fake
   }
 
@@ -104,26 +104,25 @@ export class Vault {
     if (text === '') return text
 
     const candidates = new Set<string>()
-    for (const finding of scan(text, this.cfg)) {
-      if (finding.value.length >= MIN_SECRET_LEN) candidates.add(finding.value)
+    for (const value of scanValues(text, this.cfg)) {
+      if (value.length >= MIN_SECRET_LEN) candidates.add(value)
     }
     // Every secret the vault has ever seen stays a candidate, not just the
     // ones registered from a file. A value first caught by a context-bearing
     // rule (`aws_secret_access_key = "…"`) must still be masked when it turns
     // up later on its own, where no rule would fire.
-    for (const secret of this.#bySecret.keys()) {
+    this.#secretsByLength ??= [...this.#bySecret.keys()].sort((a, b) => b.length - a.length)
+    for (const secret of this.#secretsByLength) {
       if (text.includes(secret)) candidates.add(secret)
     }
 
     let out = text
-    // Longest first, so a secret containing another is substituted whole.
     for (const secret of [...candidates].sort((a, b) => b.length - a.length)) {
       // A fake already in flight must never be masked a second time.
       if (this.#byMask.has(secret)) continue
       const fake = this.maskOf(secret)
       if (!out.includes(secret)) continue
       out = out.split(secret).join(fake)
-      this.#substitutions++
     }
     return out
   }
@@ -131,8 +130,9 @@ export class Vault {
   /** `text` with every fake in it restored to the secret it stands for. */
   unmask(text: string): string {
     if (text === '' || this.#byMask.size === 0) return text
+    this.#masksByLength ??= [...this.#byMask.keys()].sort((a, b) => b.length - a.length)
     let out = text
-    for (const fake of [...this.#byMask.keys()].sort((a, b) => b.length - a.length)) {
+    for (const fake of this.#masksByLength) {
       if (!out.includes(fake)) continue
       out = out.split(fake).join(this.#byMask.get(fake)!)
     }
@@ -151,10 +151,10 @@ export class Vault {
   entries(now: number = Date.now()): Entry[] {
     const out: Entry[] = []
     for (const [secret, fake] of this.#bySecret) {
-      const origin = this.#origin.get(secret) ?? { kind: 'literal' }
+      const source = this.#envSource.get(secret)
       out.push(
-        origin.kind === 'env'
-          ? { kind: 'env', fake, file: origin.file, key: origin.key, at: now }
+        source
+          ? { kind: 'env', fake, file: source.file, key: source.key, at: now }
           : { kind: 'literal', fake, secret, at: now },
       )
     }

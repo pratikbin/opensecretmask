@@ -18,6 +18,8 @@
 //
 // Off unless `persist` is set. When it is off nothing is written at all.
 
+import type { EngineInterface } from 'claude-code'
+
 import { parseEnv } from '../env'
 
 export type EnvEntry = {
@@ -37,6 +39,9 @@ export type LiteralEntry = {
 
 export type Entry = EnvEntry | LiteralEntry
 
+/** An entry paired with the secret it resolved to. */
+export type Resolved = { entry: Entry; secret: string }
+
 export type Snapshot = {
   version: 1
   entries: Entry[]
@@ -48,6 +53,13 @@ export type PersistPort = {
   set: (key: string, value: unknown) => Promise<void>
   readFile: (path: string) => Promise<string>
 }
+
+/** The adapter from `$`, kept beside the type it satisfies. */
+export const portOf = ($: EngineInterface): PersistPort => ({
+  get: (key) => $.store.get(key),
+  set: (key, value) => $.store.set(key, value),
+  readFile: (path) => $.fs.read(path),
+})
 
 export const STORE_KEY = 'osm.vault.v1'
 
@@ -69,38 +81,34 @@ export function prune(entries: readonly Entry[], retentionDays: number, now: num
 }
 
 /**
- * Reads the store and resolves every entry to a fake-to-secret pair.
+ * Reads the store and resolves every entry to the secret it stands for.
  *
  * An env entry whose file or key is gone is dropped rather than guessed at.
- * A read that fails resolves to an empty list: persistence is a convenience,
- * and a broken store must never stop the session.
+ * Never throws: persistence is a convenience, and a broken store must not stop
+ * the session.
  */
 export async function load(
   port: PersistPort,
   retentionDays: number,
   now: number = Date.now(),
-): Promise<{ pairs: Array<[string, string]>; entries: Entry[] }> {
-  let snapshot: Snapshot | undefined
+): Promise<Resolved[]> {
+  let raw: unknown
   try {
-    const raw = await port.get(STORE_KEY)
-    if (typeof raw === 'object' && raw !== null && (raw as Snapshot).version === 1) {
-      const list = (raw as Snapshot).entries
-      if (Array.isArray(list)) snapshot = { version: 1, entries: list.filter(isEntry) }
-    }
+    raw = await port.get(STORE_KEY)
   } catch {
-    return { pairs: [], entries: [] }
+    return []
   }
-  if (!snapshot) return { pairs: [], entries: [] }
 
-  const entries = prune(snapshot.entries, retentionDays, now)
-  const pairs: Array<[string, string]> = []
-  const kept: Entry[] = []
+  const snap = raw as Partial<Snapshot> | undefined
+  if (snap?.version !== 1 || !Array.isArray(snap.entries)) return []
+
+  const entries = prune(snap.entries.filter(isEntry), retentionDays, now)
+  const resolved: Resolved[] = []
   const files = new Map<string, Map<string, string>>()
 
   for (const entry of entries) {
     if (entry.kind === 'literal') {
-      pairs.push([entry.fake, entry.secret])
-      kept.push(entry)
+      resolved.push({ entry, secret: entry.secret })
       continue
     }
     let parsed = files.get(entry.file)
@@ -115,11 +123,10 @@ export async function load(
     const secret = parsed.get(entry.key)
     // The source moved on. Drop the entry instead of carrying a dead fake.
     if (secret === undefined) continue
-    pairs.push([entry.fake, secret])
-    kept.push(entry)
+    resolved.push({ entry, secret })
   }
 
-  return { pairs, entries: kept }
+  return resolved
 }
 
 /** Writes the snapshot. A failure is swallowed: persistence never breaks a turn. */

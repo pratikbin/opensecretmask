@@ -1,37 +1,41 @@
-// Which tool arguments must KEEP their fakes.
+// Where a restored credential must NOT go.
 //
 // The plugin restores a fake to the real secret on the way into a tool,
-// because the tool is where the credential is actually used: a `Bash` curl or
-// a `Write` of a config file needs the real value.
+// because the tool is where the credential gets used: a `Bash` curl or a
+// `Write` of a config file needs the real value.
 //
-// That assumption breaks for an argument whose consumer is another MODEL.
-// `Agent.prompt` is the task text handed to a subagent, so restoring it hands
-// that subagent the real credential and defeats the plugin for every piece of
-// delegated work. The same holds for the description shown alongside it.
+// That breaks wherever the consumer is another MODEL. The general answer is
+// the `agent.spawn` hook, which every subagent dispatch funnels through
+// whatever tool triggered it — see events/agent-spawn.ts. A per-tool-name
+// table cannot be that answer, because the next model-facing tool (an MCP
+// server taking a `prompt`, a message-passing tool) is one nobody listed.
 //
-// The rule: restore at an external-operation boundary, never at a model-facing
-// one.
+// What stays here is the narrow case the spawn hook does not cover: a tool
+// whose argument is rendered on SCREEN rather than executed. That is a
+// different invariant from the model-facing one and it is bounded, because
+// the engine owns the components that draw.
 
 /** Keys the engine owns. A rewrite of any of them is refused. */
 export const RESERVED = new Set(['tool', 'tool_use_id', 'agentId'])
 
 /**
- * Argument names that reach a model rather than an external operation,
- * by tool.
+ * Arguments that are read rather than executed.
+ *
+ * `Agent` is here as well as behind the `agent.spawn` hook, and both are
+ * wanted. The spawn hook is the general guarantee; this entry stops the real
+ * value from ever materialising in the Agent tool's recorded arguments on the
+ * way there, because the transcript keeps what a tool was called with.
+ *
+ * `AskUserQuestion` is drawn on screen. The person knows their own
+ * credentials, so a fake costs them nothing and keeps what they read
+ * consistent with what the model read.
  */
-const MODEL_FACING: Record<string, ReadonlySet<string>> = {
-  Agent: new Set(['prompt', 'description', 'name']),
-  // The question and its options are rendered for the person, who does not
-  // need the real value on screen to answer.
+const KEEP_FAKES: Record<string, ReadonlySet<string>> = {
+  Agent: new Set(['prompt', 'description']),
   AskUserQuestion: new Set(['questions']),
 }
 
 /** Whether `key` on `tool` must keep its fakes instead of being restored. */
 export function isModelFacing(tool: string, key: string): boolean {
-  return MODEL_FACING[tool]?.has(key) ?? false
-}
-
-/** Whether this tool has any model-facing argument at all. */
-export function hasModelFacingArgs(tool: string): boolean {
-  return tool in MODEL_FACING
+  return KEEP_FAKES[tool]?.has(key) ?? false
 }

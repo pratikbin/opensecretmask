@@ -20,12 +20,13 @@ Everything else in this codebase is negotiable. That is not.
 
 | Path | Owns |
 | --- | --- |
-| `hooks/register.ts` | Wiring. One `Vault`, three `register*` calls. No logic. |
+| `hooks/register.ts` | Wiring. One `Vault`, four `register*` calls. No logic. |
 | `hooks/options.ts` | `PluginOptions` → typed `Options` |
 | `hooks/env.ts` | `.env` parsing, comment- and quote-aware |
 | `hooks/events/session-start.ts` | `.env` registration + persistence restore |
 | `hooks/events/tool-call.ts` | The round trip, both directions |
 | `hooks/events/prompt.ts` | `prompt.submit` / `.context` / `.section` |
+| `hooks/events/agent-spawn.ts` | `agent.spawn`, the subagent boundary |
 | `hooks/vault/index.ts` | The two-way map |
 | `hooks/vault/garble.ts` | The format-preserving fake |
 | `hooks/vault/walk.ts` | Bounded deep traversal, binary-safe |
@@ -35,8 +36,9 @@ Everything else in this codebase is negotiable. That is not.
 | `hooks/detect/entropy.ts` | Shannon layer |
 | `hooks/detect/suppress.ts` | False-positive suppression |
 | `hooks/detect/rules/*.ts` | 140 patterns in six groups |
+| `hooks/policy/boundary.ts` | `outbound`/`inbound`, where `ref` is stripped |
 | `hooks/policy/model-facing.ts` | Arguments that must keep their fakes |
-| `hooks/policy/budget.ts` | Self-imposed deadline |
+| `hooks/policy/budget.ts` | Failure fallbacks |
 
 Adding a rule source is one file in `rules/` plus one line in `rules/index.ts`.
 No registry, no init-time side effects.
@@ -52,10 +54,11 @@ These are not style choices. Each one caused a bug.
 
 **A skipped hook fails OPEN.** The engine skips a hook that throws *or
 overruns its budget* and runs core in its place. For a masker that is worse
-than being absent. A `try`/`catch` cannot see a timeout, so every hook races
-its work against `BUDGET_MS` (8 s) via `policy/budget.ts` and returns a
-deny/drop first. `Registration.catch` exists too but only helps inside its own
-grace window.
+than being absent, so every hook answers for itself via `policy/budget.ts`.
+
+The deadline must cover our own work and never a `next()` call. An earlier
+version wrapped `next()`, which charged every hook beneath us to our budget —
+a slow unrelated plugin made osm drop the user's prompt and blame itself.
 
 **`ref` pins the unmasked messages.** `next(e)` returns a `ref` naming the
 messages core already built. Return it and core uses those verbatim — the
@@ -73,9 +76,17 @@ the model where the user never sees it.
 **`agentId` is camelCase.** The classic-hook spelling `agent_id` reads
 `undefined`.
 
-**Restoring is for external boundaries only.** `Agent.prompt` is read by
-another *model*, so restoring it hands a subagent the real credential.
-`model-facing.ts` is the list.
+**Restoring is for external boundaries only.** A value another model reads is
+not one. `agent.spawn` is the general guarantee — every subagent dispatch goes
+through it whatever tool triggered it, so a tool-name list can never be the
+only answer. `model-facing.ts` additionally keeps the real value out of the
+Agent tool's recorded arguments.
+
+**"Opaque payload" is a property of the string, not of its key.** `walk.ts`
+once skipped subtrees by key name (`data`, `base64`, …) to avoid garbling
+images. That made `{ data: { apiKey: "sk-ant-…" } }` reach the model
+unmasked — a fix for one problem became a leak. Test the leaf: long,
+whitespace-free, base64 alphabet.
 
 ## Vault lifetime
 
@@ -102,7 +113,7 @@ The store is plaintext and the plugin cannot chmod it — `$.fs` has no chmod.
 ## Build and test
 
 ```sh
-bun run scripts/unit-check.ts                          # 31 pure-logic checks
+bun run scripts/unit-check.ts                          # 40 pure-logic checks
 claude plugin test .                                   # engine-level hooks
 npx --yes --package typescript@5 tsc -p tsconfig.json  # NB: --package, see below
 bash scripts/local-e2e.sh                              # real model, your account
