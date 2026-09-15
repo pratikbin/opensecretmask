@@ -14,4 +14,4 @@ jobs:
         with:
           node-version: '22'
       - name: Typecheck hooks and tests
-        run: npx --yes typescript@5 tsc -p tsconfig.json
+        run: npx --yes --package typescript@5 tsc -p tsconfig.json
