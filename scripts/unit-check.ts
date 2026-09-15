@@ -2,8 +2,7 @@
 //
 //   bun run scripts/unit-check.ts
 //
-// The engine-level tests live in register.test.ts and need `claude plugin
-// test .`. This file covers what that harness cannot reach cheaply: the
+// The hook-level checks live in scripts/hook-check.ts. This file covers the
 // detector, the vault, the .env parser, the persistence split and the budget.
 
 const R = new URL('../hooks', import.meta.url).pathname

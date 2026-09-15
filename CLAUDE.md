@@ -114,7 +114,7 @@ The store is plaintext and the plugin cannot chmod it — `$.fs` has no chmod.
 
 ```sh
 bun run scripts/unit-check.ts                          # 40 pure-logic checks
-claude plugin test .                                   # engine-level hooks
+bun run scripts/hook-check.ts                          # 12 hook-level checks
 npx --yes --package typescript@5 tsc -p tsconfig.json  # NB: --package, see below
 bash scripts/local-e2e.sh                              # real model, your account
 bash scripts/sandbox-e2e.sh                            # real model, throwaway box
