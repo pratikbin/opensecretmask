@@ -1,255 +1,129 @@
-# opensecretmask — project notes
+# osm, project notes
 
-`osm` is a local CA-MITM proxy that masks secrets in LLM API traffic: secrets
-in outbound requests are swapped for format-preserving fakes and restored in
-the responses. Real credentials never reach the provider.
+`osm` is a Claude Code plugin that masks secrets. A secret becomes a
+format-preserving fake before the model reads it. The real secret returns on
+the way into a tool call. The plugin holds its state in memory and writes
+nothing to disk.
 
-## Architecture
+This repository held a local proxy before. That Go code is deleted. If you
+need that code, read the git history.
 
-| Package | Role |
+## Layout
+
+| Path | Role |
 | --- | --- |
-| `cmd/osm` | cobra CLI: `init`, `uninstall`, `proxy`, `run`, `add`, `preload`, `status`, `doctor`, `shell` |
-| `internal/crypto` | AES-256-GCM + Argon2id key derivation |
-| `internal/daemon` | background-daemon lifecycle: record, health, serialized spawn, watch, stop, restart |
-| `internal/store` | encrypted SQLite (`modernc.org/sqlite`, no cgo) |
-| `internal/history` | request-history policy: capture cap, bounded admission, drop accounting, retention |
-| `internal/detect` | pluggable `Provider`s (builtin, llm, cloud, chat, git) + Shannon entropy |
-| `internal/mask` | format-preserving garble, masker, streaming unmasker |
-| `internal/proxy` | `goproxy` CA-MITM, route-by-host, request/response masking |
-| `internal/proxyproc` | proxy-process runtime: ordered construction with rollback, listener ownership, serving, bounded drain |
-| `internal/dashboard` | embedded htmx + daisyUI web UI: tabbed overview / requests / secrets, per-request debug view |
-| `internal/shell` | embedded posix-shell init script + rc-file installer; modelled on AikidoSec/safe-chain |
+| `.claude-plugin/plugin.json` | The plugin manifest |
+| `hooks/hooks.json` | Names the hooks module |
+| `hooks/register.ts` | The five hooks and the `.env` reader |
+| `hooks/rules.ts` | The 138 detection patterns, in six groups |
+| `hooks/detect.ts` | The scanner, the prefix walker, the entropy test |
+| `hooks/vault.ts` | The fake generator and the two-way map |
+| `hooks/index.ts` | Re-exports for callers |
+| `tests/` | Hook tests for `claude plugin test` |
+| `scripts/sandbox-e2e.sh` | The end-to-end runner for a disposable box |
+| `types/claude-code.d.ts` | The vendored engine declarations |
+
+## Hooks
+
+| Hook | Direction | Action |
+| --- | --- | --- |
+| `session.start` | none | Registers the credentials in the `.env` files |
+| `tool.call` down | model to world | Restores every fake in the tool arguments |
+| `tool.call` up | world to model | Masks every secret in the tool result |
+| `prompt.submit` | user to model | Masks the prompt and its context blocks |
+| `prompt.section` | memory to model | Masks `CLAUDE.md` and the memory files |
+
+One `tool.call` hook covers Read, Bash, Grep, WebFetch, Write, the Agent
+tool, and every MCP tool. It sits at the tool boundary, so it is not a list
+of tool names.
 
 ## Key design
 
-- Masking is **byte-level** find-and-replace — provider/dialect agnostic.
-  Request bodies are masked whole; responses (JSON + SSE) are unmasked.
-- A secret maps to a stable mask via the store, not via cryptographic
-  inversion; reversal is a lookup.
-- SSE unmasking uses tail-hold buffering so a mask split across stream chunks
-  is still caught.
-- Registered secrets (`osm add` / `preload`) are the guaranteed exact-match
-  layer; regex/entropy detection is best-effort.
-- The proxy fails closed — an unmaskable request body is blocked, not sent.
-- Masking is scoped per provider to request paths (`Provider.Paths`, regexp).
-  An empty list or `*` masks every path — the default for every built-in
-  provider. An out-of-scope path is logged but forwarded unmasked.
-- Secret values are encrypted with a passphrase-derived key; the mask is
-  stored in plaintext (it is sent to the LLM by design).
-- Headers are never masked — the agent's real `Authorization` / `x-api-key`
-  is the upstream credential and must pass through.
-- Detection rules live in `internal/detect/rules_<domain>.go` files
-  (`rules_builtin.go`, `rules_llm.go`, `rules_cloud.go`, `rules_chat.go`,
-  `rules_git.go`, `rules_devtools.go`). Each declares a `Provider` value
-  with no init magic and no external config; `DefaultProviders()` in
-  `provider.go` composes them. Adding rules from another source = drop one
-  `rules_<name>.go` file + append the provider literal. No allowlists, no
-  gitleaks-style anchors — prefix-distinctive regexes only, so detection
-  stays stateless across JSON bodies, headers, and bare tokens.
-- The proxy process's runtime lives in `internal/proxyproc`, not in the Cobra
-  closure. `Start` acquires the CA, store, masker, provider policy, both
-  listeners, and both servers in dependency order, registering an undo step
-  for each acquisition that holds an OS resource, so a failure at any step
-  unwinds exactly what was acquired.
-  `Serve` runs both servers, drains them on cancellation, and releases the
-  daemon record and the store.
-- Ownership split: `internal/daemon` is the only writer of the pidfile.
-  `internal/proxyproc` receives `Publish`/`Unpublish` callbacks and decides
-  only when they fire — after both listeners bind, and after serving stops.
-  The runtime never installs a signal handler; the CLI converts signals to
-  cancellation at the process edge.
-- Request history is one module (`internal/history`), not a policy split three
-  ways. It owns the body cap, admission and drop accounting, record
-  construction, and retention. The proxy hands it an `Exchange`; the dashboard
-  reads its drop counter. Retention runs for as long as the process runs —
-  it is no longer a side effect of the dashboard being open.
-- Retention is `--history-retention` (default `168h`, `0` disables). Like every
-  spawn setting it is recorded in `proxy.pid` and reapplied on respawn and
-  restart.
-- Drop accounting is in-memory and process-local. `osm status` runs in a
-  separate process with no IPC to the daemon and cannot show it; the dashboard,
-  which runs inside the daemon, is the only surface.
+- Masking is a plain text replacement. It reads no provider format.
+- A secret maps to a fake through the vault map and not through reversible
+  math. Restoring a secret is a lookup.
+- Registered secrets are the exact-match layer. Detection rules are the
+  best-effort layer.
+- The vault dies with the session, so there is nothing at rest to encrypt and
+  no passphrase to enter.
+- Every pattern in `hooks/rules.ts` starts with a distinctive prefix. There
+  are no allowlists and no anchors, so detection works the same way in JSON
+  bodies, in file contents, and in bare tokens.
+- `literalPrefix()` in `hooks/detect.ts` walks a pattern source and returns
+  the fixed text that the pattern must begin with. That prefix gates the scan,
+  and `garble()` keeps it verbatim. For the Anthropic rule it returns 7, so
+  `sk-ant-` survives and `api03` becomes something else.
+- A fake is public by design, because the model reads it. So `garble()` uses
+  `Math.random` and not a cryptographic generator.
+- A fake matches the detection patterns by design. So `mask()` skips any value
+  that the vault already knows as a fake.
 
-## Performance design
+## Engine invariants
 
-Key constants and decisions (sized for LLM workloads with multi-PDF/image payloads):
+Two rules come from the engine and shape the hook code.
 
-- `proxy.maxRequestBody = 512 MiB` — cap for `io.LimitReader` on request and response
-  bodies. Prevents OOM from adversarially large inputs while accommodating real
-  multi-PDF + image payloads. Bodies exceeding the limit return HTTP 413 (requests)
-  or are silently capped (responses stored for dashboard only).
-- `history.MaxBody = 256 KiB` — per-request body stored in the dashboard log.
-  `history.Capture` always `bytes.Clone`s from the read buffer so the multi-MB
-  read buffer is freed. It is called **synchronously** on the proxy's
-  request/response path; moving it into the recorder's async write would keep
-  the large buffer alive across the goroutine hop.
-- `Transport.MaxIdleConns = 200 / MaxIdleConnsPerHost = 100` — connection pool sized
-  for concurrent LLM requests; `ResponseHeaderTimeout = 600 s` accommodates long
-  chain-of-thought and agentic loops.
-- `store.RegisteredSecrets` cache — decrypted secret list held in `sync.RWMutex`-guarded
-  `Store.regCache`; populated lazily on first call, invalidated on `PutSecret` (registered)
-  and `Unlock`. Eliminates per-request DB scan + AES decrypt.
-- `store.MaskExists` in-memory set — `Store.maskSet map[string]struct{}` loaded lazily,
-  updated on every `PutSecret`. Eliminates up to 8 DB round-trips per novel secret's
-  garble-retry loop.
-- `store.TouchSecrets` batch — collects all secret IDs used in one request and issues a
-  single `UPDATE … WHERE id IN (…)` instead of N serial writes.
-- `detect.findingMapPool` — `sync.Pool` for the per-`Scan` dedup map; `clear` + `Put` on
-  exit avoids per-call allocations for the 139-rule map.
-- `mask.usedMapPool` — `sync.Pool` for the `map[int64]store.Secret` used in `MaskBody`.
-- `history.Recorder` write pool — 32 concurrent writes, admission by
-  non-blocking select. A saturated pool drops the newest record, counts it in
-  an atomic, and logs one line; the count is surfaced in the dashboard header.
-  Writes run on `context.Background()` so SQLite latency never adds to
-  client-perceived response time. `Recorder.Close` drains them, and the proxy
-  runtime calls it before closing the store.
+- The engine skips a hook that throws an error and runs its own code instead.
+  For a masking hook that outcome is worse than not being installed. So every
+  hook catches its own errors, and it denies or drops.
+- `next(e)` returns a `ref` that names the messages the engine already built
+  for the call. If a hook returns that `ref`, the engine uses those messages
+  unmasked. A rewritten result must answer without `ref`.
 
-## Future TODO
-
-- **Partial-mask leak in response stream.** Unmasker swaps complete mask
-  values back to originals byte-for-byte. When the LLM emits only a
-  substring of a mask (e.g. references `wi-cx- prefix` instead of the full
-  `wi-cx-q46q4711-2n24-93e6-oy66-5jdev08`), no swap fires and the partial
-  mask appears in the user's TUI. Harmless for privacy (the upstream still
-  saw only the mask), mild UX wart. Fixing robustly requires partial-prefix
-  matching with false-positive guards; not worth chasing until a real
-  user-facing complaint surfaces.
-- **PII detection provider.** SSN sits in `builtinRules`; a dedicated
-  `pii` provider (email, phone, credit-card, address) is the natural shape
-  but defaults-off because agent prompts legitimately contain user PII —
-  masking by default breaks the assistant.
-
-## `osm init` and trust model
-
-`osm init` creates the state dir, encrypted store, and a local CA. It does
-**not** modify the system trust store and needs **no administrator access**.
-
-Trust is per-process: `osm run -- <cmd>` exports `HTTPS_PROXY`,
-`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, and
-`CURL_CA_BUNDLE` only for the child command. Nothing outside that one
-process trusts the osm CA. This is the only supported path — `osm run -- claude`
-is the recommended entry point.
-
-`osm uninstall` is deprecated (nothing to uninstall). To wipe state:
-`rm -rf $OPENSECRETMASK_HOME` or `osm uninstall --purge`.
-
-## Shared proxy daemon
-
-The first `osm run` on a machine spawns a background `osm proxy` daemon
-(fork-exec, `setsid`, stdio → `$OPENSECRETMASK_HOME/daemon.log`) and records
-its PID and bound addresses in `$OPENSECRETMASK_HOME/proxy.pid`. Subsequent
-`osm run` invocations read that pidfile, verify the process is alive and the
-TCP port is reachable, and reuse the existing daemon — no second proxy is
-spawned. If the daemon has died (host reboot, manual kill, crash), the next
-`osm run` cleans the stale pidfile and respawns.
-
-The daemon **outlives the child** and is not reaped on parent exit. Stop it
-manually with `kill $(jq -r .pid < $OPENSECRETMASK_HOME/proxy.pid)`; a clean
-SIGTERM removes the pidfile so the next `osm run` doesn't see it as healthy.
-
-Concurrency-safe: two simultaneous `osm run` invocations serialize on
-`flock(proxy.pid.lock)` during the check-and-spawn window so the loser
-reuses what the winner started instead of racing a duplicate daemon.
-
-All of this lives in `internal/daemon`. The CLI commands are adapters: they
-resolve flags, environment, and the passphrase, then make one lifecycle call
-(`Status`, `Ensure`, `Stop`, `Restart`, `Watch`) and render the result. The
-proxy process itself publishes the record via `daemon.Publish` — with
-`--listen :0` it is the only party that knows the bound addresses. Every OS
-interaction the package performs goes through an unexported seam struct, so
-its tests drive spawn failure, readiness timeout, PID reuse, and
-cancellation-during-respawn without fork-exec or multi-second waits.
-
-`osm restart` works against a stale record too: it clears the record and
-brings a fresh daemon up on the recorded addresses. The watchdog (`Watch`)
-reads its spawn configuration from the daemon's own persisted record rather
-than inheriting it from the `osm run` invocation that started watching, so a
-respawn always matches what is actually on disk.
-
-Passphrase flow: the daemon needs `$OSM_KEY` to unlock the store at startup.
-When `osm run` is the spawner, it reads `OSM_KEY` (or prompts once) and
-passes it via the spawned process's env. On reuse, no prompt — the daemon
-already holds the unlocked store. `osm shell` wrappers must therefore have
-`OSM_KEY` exported, or the first invocation must run in a TTY.
-
-Flags `--listen`, `--dashboard`, `--provider`, `--detect-entropy`,
-`--log-level`, `--allow-external-bind` on `osm run` apply **only when
-spawning**; once a daemon is running, flag changes on subsequent `osm run`
-calls are ignored. Restart the daemon to pick them up. Both listener
-addresses are validated against loopback at startup
-(`cmd/osm/listen.go`) unless `--allow-external-bind` is set; the policy is
-persisted in the pidfile spawn config.
-
-## Shell integration (`osm shell`)
-
-`osm shell install` makes typing bare `claude`, `codex`, or `pi` transparently
-run `osm run -- <cmd>`. It writes one source line to `~/.zshrc` and `~/.bashrc`
-(whichever exist) pointing at `$OPENSECRETMASK_HOME/scripts/init-posix.sh`
-(embedded via `//go:embed`). The script defines shell functions whose names
-shadow the PATH lookup; absence of `osm` on PATH falls through to the bare
-command with a yellow `Warning:`. Stderr banner suppressible via `OSM_QUIET=1`.
-
-`osm shell uninstall` strips the source line, with the same safety guards used
-by safe-chain (line length cap, no embedded newlines). A one-shot pre-osm
-backup is written to `<rc>.osm.bak` and never overwritten on subsequent
-installs. `osm shell status` reports per-rc-file state.
-
-Note: codex / pi currently bypass the masking proxy (websocket / non-
-`HTTPS_PROXY` transport per `osm tool coverage`). The wrapper is in place
-ready for when those transports are intercepted.
-
-## Build, test, lint
-
-Makefile targets (preferred):
+## Build and test
 
 ```sh
-make build             # go build -o osm ./cmd/osm
-make test              # unit + race
-make test-integration  # testcontainers-driven integration suite (Docker req'd)
-make test-e2e          # full e2e in container (Docker + ANTHROPIC_AUTH_TOKEN)
-make lint              # golangci-lint + gosec + govulncheck
-make vuln              # govulncheck only
-make fix               # go fix ./... + gofmt -w .
-make all               # build + test + lint
+npx tsc -p tsconfig.json     # type-check the hooks and the tests
+claude plugin test .         # run the hook tests
 ```
 
-Or directly:
+`types/claude-code.d.ts` is the vendored declaration file that
+`/plugin-types` writes. When the engine API moves, refresh it.
 
-```sh
-go build ./cmd/osm
-go test ./...
-golangci-lint run ./... && gosec -exclude-dir=.agents -exclude-dir=.recovered2 ./... && go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
-```
+### End-to-end runs
 
-CI pipeline is in `.github/workflows/ci.yml` (build/test/lint/security jobs + weekly scheduled govulncheck).
+Two runners drive a real model through the whole round trip.
 
-- Go toolchain is pinned in `.tool-versions` (asdf). `govulncheck` is invoked via
-  `go run golang.org/x/vuln/cmd/govulncheck@<version>` rather than an asdf-managed
-  binary, since no asdf plugin for it is guaranteed to exist.
-- `gosec` doesn't follow Go's convention of skipping dot-prefixed directories, so
-  it needs `-exclude-dir=.agents -exclude-dir=.recovered2` to avoid scanning the
-  gitignored skill-asset examples and recovered-code snapshot.
-- `.golangci.yml` uses **golangci-lint v2 schema** with the `modernize` linter enabled.
-  Requires golangci-lint v2.6.0+: `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`.
-- The dashboard CSS (`internal/dashboard/assets/dashboard.css`) is a committed,
-  embedded artifact built from `styles.css` with Tailwind v4 + daisyUI.
-  Regenerate after editing dashboard templates:
-  `cd internal/dashboard && bun install && bun run build`.
-- `OPENSECRETMASK_HOME` overrides the state directory and `OSM_KEY` supplies
-  the passphrase non-interactively — both are used by the tests.
-- Tests cover crypto round-trips, detector rules, mask/unmask round-trips,
-  the proxy (real CA-MITM round-trip, JSON + split SSE), the dashboard, and
-  the CLI.
-- Three test layers, distinct shapes:
-  | Layer | Where it runs | Docker | LLM creds | Build tag |
-  | --- | --- | --- | --- | --- |
-  | Unit / CLI | host process | no | no | none |
-  | Integration | testcontainers (Linux) | yes | no | `integration` |
-  | E2E | testcontainers (Linux) | yes | yes (ANTHROPIC_AUTH_TOKEN) | `e2e` |
-- `tests/integration/run_smoke_test.go` exercises `osm run` end-to-end
-  (env-var injection + mask round-trip via `osm run -- curl …`) against
-  the in-process mock at `tests/internal/mockupstream`. The mock mints
-  its TLS leaf from the osm CA, which the proxy auto-trusts upstream —
-  see `docs/THREAT_MODEL.md §3.8` for the rationale.
-- `tests/e2e/e2e_test.go::TestE2E_Run_MaskRoundTrip` exercises the same
-  flow inside the existing claude-code-bearing e2e container.
+`scripts/local-e2e.sh` runs on this machine and this account. It needs Claude
+Code 2.1.272 or newer. Run it inside `tmux`, because each pass takes a minute.
+
+`scripts/sandbox-e2e.sh` runs in a disposable Linux box against OpenRouter.
+Export `OPENROUTER_API_KEY` before you run it. The `devbox:1` image ships
+Claude Code 2.1.260, which is too old for function hooks, so the script
+upgrades Claude Code first.
+
+Both runners passed every check. The local run used Claude Code 2.1.272. The
+sandbox run used the same version with `anthropic/claude-sonnet-4.5`.
+
+| Test | Observed |
+| --- | --- |
+| Control, no plugin | The model echoed the real key, so the test is meaningful |
+| Result masked | The model echoed `sk-ant-rqm01-XGEEYNMQ…` and not the real key |
+| Format kept | The `sk-ant-` prefix stayed, and the length matched |
+| Args unmasked | `grep` found the real key, so the tool received it |
+| `.env` layer | `ACME_DB_PASSWORD` was masked, `PORT` and `NODE_ENV` were not |
+
+Row two and row four together are the round trip. The model composed a
+command around the fake it read. The command ran against the real credential.
+
+Three traps make these runners look broken when they are not.
+
+- `--allowedTools` is variadic, so a prompt placed after it is read as another
+  tool name. `scripts/local-e2e.sh` passes the prompt on stdin.
+- A prompt that asks the model to write a credential into a file reads as an
+  exfiltration pattern, and the model refuses. The restore direction is
+  observed with `grep -c` instead.
+- The `Read` tool needs explicit approval for a `.env` file. The local runner
+  puts the same value in `app-config.txt` and reads that.
+
+## Open items
+
+- `prompt.context` blocks are not masked. When a secret turns up in a context
+  block, add the hook.
+- A partial fake does not restore. Restoration swaps a whole fake, byte for
+  byte. If the model repeats only the first characters of a fake, those
+  characters stay on screen. A complete fix needs prefix matching with guards
+  against false positives.
+- There is no PII group. A social security number pattern sits in the builtin
+  group. A separate group for email, phone, and card numbers is the natural
+  shape. That group must default to off, because agent prompts carry user
+  data on purpose.
