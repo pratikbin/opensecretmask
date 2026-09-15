@@ -1,220 +1,165 @@
-# opensecretmask
+# osm
 
-`osm` is a local CA-MITM proxy that replaces matched, mask-eligible payload
-secrets in intercepted, in-scope LLM API request bodies.
-It sits between your AI tools (Claude Code, the OpenAI SDK, …) and the
-provider. On the way out it swaps those secrets for **format-preserving
-fakes**; on the way back it restores complete known fakes found in responses.
-For a matched, mask-eligible body secret, the provider sees the fake. Upstream
-authentication headers are intentionally outside masking because the provider
-needs the real credential.
+`osm` keeps your secrets out of the model. It is a Claude Code plugin. It
+replaces a secret with a fake before the model reads it. It puts the real
+secret back on the way into a tool call. Everything stays in memory, and
+nothing is written to disk.
 
-```
-  AI tool ──HTTPS──▶  osm proxy  ──HTTPS──▶  api.anthropic.com
-                      │ mask request body     (eligible matches are fake)
-                      │ unmask JSON / SSE
-  AI tool ◀─HTTPS───  osm proxy  ◀─HTTPS───  api.anthropic.com
-```
-
-A secret like `sk-ant-api03-REALKEY…` becomes `sk-ant-api03-9fX2qLm…` — same
-prefix, same length, same character classes — so the model treats it exactly
-like a real credential. The mapping is kept, encrypted, in a local SQLite
-database; restoring the original on the response is a lookup.
+A fake is format-preserving. It keeps the vendor prefix, the length, and the
+character classes of the real secret. The real key `sk-ant-api03-Xk9…` becomes
+`sk-ant-nvd59-RAT…`. The model treats the fake the way it treats a real key.
+When the model writes that fake into a tool call, `osm` swaps the fake back
+for the real key.
 
 ## Install
 
-```sh
-go install github.com/pratikbin/opensecretmask/cmd/osm@latest
-# or from source:
-git clone https://github.com/pratikbin/opensecretmask
-cd opensecretmask && go build -o osm ./cmd/osm
-```
+You need Claude Code 2.1.272 or newer. Function hooks are early access. A
+function hook is a TypeScript function that wraps one engine event.
 
-## Quickstart
+Clone the plugin once, then point Claude Code at that directory from inside
+your own project. `--plugin-dir` takes the directory that holds
+`.claude-plugin/plugin.json`, so pass the clone and not a path under it.
 
 ```sh
-osm init                            # state dir, local CA (installed), passphrase
-osm add OPENAI_KEY=sk-proj-…         # register a secret to mask
-osm preload                         # …or scan .env files in the current directory
-osm proxy                           # run the proxy + dashboard
+git clone https://github.com/pratikbin/opensecretmask ~/.claude/osm
+
+cd ~/your-project
+CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir ~/.claude/osm
 ```
 
-Then point your tools at the proxy (`osm init` prints these with real paths):
+If you run Claude Code from the clone itself, pass `--plugin-dir .` instead.
 
-```sh
-export HTTPS_PROXY=http://127.0.0.1:8787
-export NODE_EXTRA_CA_CERTS=~/.opensecretmask/ca-cert.pem   # Claude Code / Node tools
-export SSL_CERT_FILE=~/.opensecretmask/ca-cert.pem         # some Python / Go tools
-```
+## Test results
 
-Or skip both the exports **and** `osm proxy` — `osm run` is self-contained.
+The plugin ran end to end twice. One run used a local machine with Claude
+Code 2.1.272 on a normal account. The other used a disposable Linux box with
+`anthropic/claude-sonnet-4.5` through OpenRouter. Both runs passed every
+check.
 
-Or install shell integration once and just type the bare command:
-
-```sh
-osm shell install         # wires ~/.zshrc and ~/.bashrc (write-once .osm.bak backup)
-claude                    # auto-runs `osm run -- claude`
-```
-
-Wrapped tools: `claude`, `codex`, `pi`. Suppress the per-invocation banner
-with `OSM_QUIET=1`. Remove with `osm shell uninstall`.
-
-The first `osm run` on a host spawns a background `osm proxy` daemon and
-records its PID + address in `~/.opensecretmask/proxy.pid`. Subsequent
-invocations reuse that daemon; if it has died, the next `osm run`
-respawns. The daemon outlives the child — stop it with
-`kill $(jq -r .pid < ~/.opensecretmask/proxy.pid)`. The per-process env
-vars make Node, Python, and curl trust the CA without any system trust
-install:
-
-```sh
-osm run -- claude          # 1st: spawns daemon; rest: reuses it
-osm run -- codex
-```
-
-## What `osm init` does
-
-`osm init` is one-time setup and needs **no administrator access**:
-
-1. Creates the state directory `~/.opensecretmask/` (mode `0700`).
-2. Prompts for a passphrase and creates the encrypted SQLite store. The
-   passphrase is never written to disk.
-3. Generates a local root CA — `ca-cert.pem` and `ca-key.pem` (mode `0600`).
-
-osm does **not** install the CA into your system trust store. Trust is
-per-process: `osm run -- <cmd>` exports `NODE_EXTRA_CA_CERTS`,
-`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, and
-`HTTPS_PROXY` only for the child command, so nothing outside that one
-process is affected. This is the recommended way to use osm.
-
-## How it works
-
-- **Interception** — `osm` is an HTTPS proxy with its own local CA.
-  `osm run` exports proxy and CA-trust env vars for one child command so
-  that command trusts the intercepted TLS; nothing else on the system
-  changes. Only configured LLM hosts are intercepted; all other traffic
-  is tunnelled untouched.
-- **Detection** — request bodies are scanned by pluggable `Provider`s
-  (builtin patterns vendored from [pipelock](https://github.com/luckyPipewrench/pipelock)
-  Apache-2.0, plus llm/cloud/chat/git providers covering Perplexity,
-  Bedrock, Slack, GitLab variants and more) on top of your registered
-  secrets. An optional Shannon-entropy pass (`osm proxy --detect-entropy`)
-  catches unknown high-entropy tokens.
-- **Masking** — each secret is replaced by a random, same-shape fake. The
-  same secret always maps to the same fake, so the model sees something
-  stable and credential-shaped.
-- **Unmasking** — JSON responses and SSE token streams are scanned for known
-  fakes and reversed. Streaming uses tail-hold buffering, so a fake split
-  across two stream chunks is still caught.
-- **Storage** — secret values are encrypted with AES-256-GCM; the key is
-  derived from your passphrase with Argon2id. The passphrase is never stored.
-
-## Commands
-
-| command | purpose |
+| Test | Result |
 | --- | --- |
-| `osm init` | create the state directory, CA, and encrypted store |
-| `osm uninstall` | _deprecated_ — osm installs nothing system-wide; use `rm -rf ~/.opensecretmask` or `osm uninstall --purge` |
-| `osm proxy` | run the masking proxy and dashboard |
-| `osm run -- command [args]` | run a command routed through the proxy |
-| `osm add NAME=VALUE` | register a secret to mask |
-| `osm preload [dir]` | register every value found in `.env` files |
-| `osm status` | show stored secrets and proxy activity |
-| `osm doctor` | check the installation |
-| `osm shell install` | wrap `claude`/`codex`/`pi` so the bare command runs through `osm run` |
-| `osm shell uninstall` | remove the source line from `~/.zshrc` / `~/.bashrc` |
-| `osm shell status` | report shell integration state per rc file |
+| Control run without the plugin | The model read the real key, so the test is meaningful |
+| Tool result masked | The model read `sk-ant-rqm01-XGEEYNMQ…` and not the real key |
+| Format kept | The fake kept the `sk-ant-` prefix and the same length |
+| Tool argument restored | `grep` found the real key, so the tool received it |
+| `.env` layer | `ACME_DB_PASSWORD` was masked, `PORT` and `NODE_ENV` were not |
 
-`osm proxy` intercepts the major LLM provider API hosts by default —
-Anthropic, OpenAI, Google Gemini/Vertex, xAI, Mistral, Cohere, Perplexity,
-DeepSeek, Groq, Together, Fireworks, OpenRouter, HuggingFace and more (35
-hosts). Add others with `--provider api.example.com=openai` (repeatable).
-Cloud platforms with per-resource hostnames (Azure OpenAI, AWS Bedrock,
-watsonx, Databricks, OCI) are not matched by default — add them explicitly.
+Row two and row four are the round trip. The model built a command around the
+fake it read. The command ran against the real key.
 
-**Path scoping.** Each provider can restrict masking to specific request
-paths via `Provider.Paths` (regexp list). An empty list or `"*"` masks every
-path — the default for every built-in provider, including Anthropic and
-OpenAI. Out-of-scope requests (when an explicit allowlist is configured) are
-still intercepted and logged (dashboard shows `masked=0`) so you can spot
-unexpected paths and adjust scoping if needed.
+## What it hooks
 
-## Dashboard
+| Hook | Direction | Action |
+| --- | --- | --- |
+| `session.start` | none | Registers the credentials in the `.env` files of the session |
+| `tool.call` down | model to world | Restores every fake in the arguments of the tool |
+| `tool.call` up | world to model | Replaces every secret in the result of the tool |
+| `prompt.submit` | user to model | Replaces every secret in the prompt and its context blocks |
+| `prompt.section` | memory to model | Replaces every secret in `CLAUDE.md` and the other memory files |
 
-`osm proxy` serves a dashboard at `http://127.0.0.1:8788`: live request
-history, the secret store, and per-secret reveal-on-click. Mask-eligible
-matches are shown as fakes until explicit reveal. Captured provider-owned opaque
-fields can already contain original bytes and are not covered by that display
-guarantee.
+One `tool.call` hook covers `Read`, `Bash`, `Grep`, `WebFetch`, `Write`, the
+Agent tool, and every MCP tool. The hook sits at the tool boundary. It is not
+a list of tool names.
 
-## Security model
+## Detection
 
-- **Registered secrets** (`osm add`, `osm preload`) are the exact-match layer
-  for mask-eligible body fields. Headers, attachment subtrees, data URLs, and
-  provider-owned opaque fields are outside that guarantee.
-- **Pattern / entropy detection** is best-effort: it catches common
-  credential formats but is not a guarantee. Register anything critical.
-- The proxy **fails closed** — if a request body cannot be masked, the
-  request is blocked rather than forwarded.
-- The local CA private key lives at `~/.opensecretmask/ca-key.pem` (mode
-  `0600`). Anything that can read it could intercept your HTTPS traffic;
-  treat it like any other private key.
-- Proxy and dashboard listeners bind loopback only; non-loopback binds are
-  rejected at startup. `--allow-external-bind` overrides this as an explicit
-  operator choice: a non-loopback proxy is an unauthenticated general CONNECT
-  proxy and a non-loopback dashboard exposes plaintext reveal routes. Never
-  use it on a shared network.
+`hooks/rules.ts` holds 138 patterns across six groups: builtin, llm, cloud,
+chat, git, and devtools. Every pattern starts with a distinctive prefix. There
+are no allowlists and no anchors, so detection works the same way in JSON
+bodies, in file contents, and in bare tokens.
 
-## Limitations
+`osm` uses two layers.
 
-- JSON bodies are decoded and masked in string leaves; non-JSON bodies use raw
-  byte matching. Data URLs and base64-like payload strings are intentionally
-  skipped.
-- Anthropic thinking signatures and redacted-thinking data are restored
-  byte-for-byte after masking so the provider accepts them. They are forwarded
-  and can be retained in request history in original form.
-- Only traffic using the proxy and matching an intercepted host is protected.
-  Out-of-scope paths are forwarded unmasked, and headers are never masked.
-- The dashboard has no authentication. Its reveal routes can return plaintext
-  originals; loopback binding is enforced at startup unless explicitly
-  overridden with `--allow-external-bind`.
+- Registered secrets are the exact-match layer. `osm` reads them from the
+  `.env` files of the session at `session.start`. A value qualifies on two
+  grounds. If its name reads like a credential name, for example `*_KEY` or
+  `*_TOKEN`, `osm` registers it. If a pattern matches its shape, `osm`
+  registers it. `PORT=3000` stays readable to the model.
+- Detection rules are the best-effort layer. `osm` applies them to every tool
+  result and to every prompt.
 
-## Development
+## Options
 
-Architecture deepening candidates, security prerequisites, and evidence are
-documented in
-[docs/architecture-review/](docs/architecture-review/README.md).
+These are the plugin options and their default values.
 
-The mechanical coverage contract (what traffic is masked, and what is
-deliberately not) lives in [docs/COVERAGE.md](docs/COVERAGE.md).
-
-```sh
-make build             # go build -o osm ./cmd/osm
-make test              # unit + race
-make test-integration  # testcontainers integration suite (Docker required)
-make test-e2e          # full e2e (Docker + ANTHROPIC_AUTH_TOKEN required)
-make lint              # golangci-lint + gosec + govulncheck
-make all               # build + test + lint
+```json
+{ "entropy": false, "entropyThreshold": 4.0, "entropyMinLen": 24,
+  "envFiles": [".env", ".env.local"] }
 ```
 
-Test layers:
+`entropy` turns on a Shannon entropy test for tokens that no pattern matches.
+It is off by default. On ordinary prompt text that test reports hashes, base64
+blocks, and git commit ids as secrets.
 
-| Layer | Runs in | Docker | LLM creds |
-| --- | --- | --- | --- |
-| Unit | host process | no | no |
-| Integration | Linux container (built from `tests/integration/Dockerfile`) | yes | no |
-| E2E | Linux container with claude-code | yes | yes (`ANTHROPIC_AUTH_TOKEN`) |
+## Layout
 
-The integration suite uses an in-process mock LLM
-(`tests/internal/mockupstream`) whose TLS leaf is signed by the osm CA;
-the proxy auto-trusts its own CA upstream, so the mock round-trip works
-without any extra wiring. See `docs/THREAT_MODEL.md §3.8` for why that
-auto-trust is safe.
+| Path | Holds |
+| --- | --- |
+| `.claude-plugin/plugin.json` | The plugin manifest |
+| `hooks/hooks.json` | Names the hooks module |
+| `hooks/register.ts` | The five hooks |
+| `hooks/rules.ts` | The 138 detection patterns |
+| `hooks/detect.ts` | The scanner and the entropy test |
+| `hooks/vault.ts` | The fake generator and the two-way map |
+| `tests/` | Hook tests for `claude plugin test` |
+| `scripts/local-e2e.sh` | The end-to-end runner for your own machine |
+| `scripts/sandbox-e2e.sh` | The end-to-end runner for a disposable box |
+| `types/claude-code.d.ts` | The vendored engine declarations |
 
-Or directly:
+## Design
+
+The vault is the session. A vault is an in-memory map from a secret to its
+fake. A secret maps to a fake through this map and not through reversible
+math. Restoring a secret is a lookup. The map dies with the process, so there
+is nothing to encrypt and no passphrase to enter.
+
+The hooks fail closed. The engine skips a hook that throws an error and runs
+its own code instead. For a masking hook that behavior is worse than no hook
+at all. So each hook catches its own errors. An unmaskable result is denied.
+An unmaskable prompt is dropped.
+
+A rewrite drops `ref`. `next(e)` returns a `ref` value that names the messages
+the engine already built for the call. If a hook returns that `ref`, the
+engine uses those messages as they are, without the masking. A rewritten
+result answers without `ref`.
+
+A fake is never masked twice. A fake matches the detection patterns by design,
+because it keeps the format of the real secret. So `mask()` skips any value
+that the vault already knows as a fake.
+
+## Tests
 
 ```sh
-go build ./cmd/osm
-go test ./...
-golangci-lint run ./... && gosec ./... && govulncheck ./...
+claude plugin test .          # the hook tests
+npx tsc -p tsconfig.json      # type-check the hooks and the tests
+bash scripts/local-e2e.sh     # a real end-to-end run on your own account
 ```
+
+`scripts/local-e2e.sh` writes a fixture to a temporary directory, runs three
+headless passes, and prints a verdict for each check. Run it inside `tmux`,
+because each pass takes a minute.
+
+```sh
+tmux new-session -d -s osmtest 'bash scripts/local-e2e.sh 2>&1 | tee /tmp/osm.log'
+tmux capture-pane -p -t osmtest
+```
+
+`scripts/sandbox-e2e.sh` runs the same round trip in a disposable Linux box
+against OpenRouter. Its header holds the command.
+
+## Known limits
+
+- The fake stays on screen. `turn.complete` can add text under an answer, but
+  it cannot rewrite the answer. When Claude writes "your key is `sk-ant-…`",
+  you read the fake. The model never held the real key, so this is a display
+  problem only.
+- A partial fake does not restore. Restoration swaps a whole fake, byte for
+  byte. If the model repeats only the first characters of a fake, those
+  characters stay.
+- Unmasking into `Bash` is real, by design. The fake becomes the real
+  credential on its way into the tool. If a command sends that value to a
+  third party, it sends the real one.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

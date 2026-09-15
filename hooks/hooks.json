@@ -1,0 +1,4 @@
+{
+  "description": "Swaps a secret for a format-preserving fake before the model reads it, and swaps the fake back for the real credential on the way into a tool call",
+  "modules": ["./register.ts"]
+}
