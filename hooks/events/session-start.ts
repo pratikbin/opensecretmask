@@ -3,7 +3,8 @@ import type { EngineInterface, On } from 'claude-code'
 import { scanValues } from '../detect'
 import { looksLikeSecret, MIN_SECRET_LEN, parseEnv } from '../env'
 import type { Options } from '../options'
-import { load, portOf, save } from '../vault/persist'
+import type { PersistPort } from '../vault/persist'
+import { load, save } from '../vault/persist'
 import type { Vault } from '../vault'
 
 /**
@@ -83,4 +84,13 @@ function summary(registered: number, restored: number, options: Options): string
   return parts.length === 0
     ? 'osm: masking on, no registered secrets (detection rules still apply)'
     : `osm: masking ${parts.join(', ')}`
+}
+
+/** Built here, not imported: the hook validator follows `$` only within a file. */
+function portOf($: EngineInterface): PersistPort {
+  return {
+    get: (key) => $.store.get(key),
+    set: (key, value) => $.store.set(key, value),
+    readFile: (path) => $.fs.read(path),
+  }
 }
