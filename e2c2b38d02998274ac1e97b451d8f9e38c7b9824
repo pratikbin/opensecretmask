@@ -1,0 +1,61 @@
+Session notes: proxy to plugin
+
+Why
+---
+Claude Code shipped function hooks (anthropics/claude-code#91870), which
+put a TypeScript middleware chain inside the engine. That makes the CA
+MITM proxy unnecessary for Claude Code: the same substitution can happen
+at the tool boundary, with no certificate, no listener and no daemon.
+
+What was studied
+----------------
+- The Mods announcement and the three built-in mods published at
+  anthropics/claude-code/tree/main/mods (sec-default, diff, telemetry).
+- mods/types/claude-code.d.ts, the engine declaration file, vendored here
+  as types/claude-code.d.ts.
+- The community secret-redactor plugin, which uses opaque placeholders.
+  osm keeps format-preserving fakes instead, so the model still reasons
+  about the value as a credential of that vendor.
+
+Design decisions
+----------------
+- Session-scoped in-memory vault instead of the encrypted SQLite store.
+  A proxy daemon outlived many sessions and needed persistence. A plugin
+  does not, so the crypto and passphrase layers were dropped entirely.
+- tool.call is the single interception point in both directions. It
+  covers every built-in tool and every MCP tool without naming any.
+- Hooks catch their own errors. The engine skips a throwing hook and runs
+  core in its place, which for a masking hook is worse than absence.
+- A rewritten tool result answers without ref, because ref names the
+  messages core already built from the unmasked content.
+- Math.random is enough for garble, because the fake is sent to the model
+  by design and is therefore public.
+
+Testing
+-------
+Two runners, both driving a real model.
+- scripts/local-e2e.sh: a local account, Claude Code 2.1.272.
+- scripts/sandbox-e2e.sh: a disposable Linux box via the CreateOS driver,
+  Claude Code upgraded from 2.1.260 to 2.1.272, wired to OpenRouter over
+  the Anthropic wire (base URL openrouter.ai/api with no /v1, bearer
+  token, every model alias pinned, IS_SANDBOX=1).
+
+Each runner does a control pass with no plugin, so a pass proves the
+fixture is readable rather than proving nothing. Both runners passed.
+
+Traps found while writing the runners
+-------------------------------------
+- --allowedTools is variadic, so a prompt after it is parsed as a tool
+  name. Pass the prompt on stdin.
+- A prompt that asks the model to write a credential to a file is refused
+  as an exfiltration pattern. The restore direction is observed with
+  grep -c instead.
+- The Read tool needs explicit approval for a .env file.
+- claude --plugin-dir takes the directory holding .claude-plugin, so
+  running it from inside the clone needs a plain dot.
+
+Follow-ups
+----------
+- prompt.context blocks are still unmasked.
+- A partial fake does not restore.
+- No PII rule group yet, and it would have to default to off.
