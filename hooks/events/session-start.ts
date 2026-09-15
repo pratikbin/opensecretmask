@@ -1,34 +1,27 @@
 import type { EngineInterface, On } from 'claude-code'
 
-import { scan } from '../detect'
+import { scanValues } from '../detect'
 import { looksLikeSecret, MIN_SECRET_LEN, parseEnv } from '../env'
 import type { Options } from '../options'
-import { load, save, type PersistPort } from '../vault/persist'
+import { load, portOf, save } from '../vault/persist'
 import type { Vault } from '../vault'
 
 /**
  * Builds the exact-match layer at the start of a load.
  *
- * Two sources: the `.env` files of the session, and, when `persist` is on, the
- * fakes a previous session minted. Both are best-effort. A failure here leaves
- * the detection rules working on their own rather than stopping the session.
+ * Two sources: the fakes a previous session minted, when `persist` is on, and
+ * the `.env` files of the session. Restoring first keeps a fake stable across
+ * a resume, because `register` then finds the mapping already present.
+ *
+ * Both are best-effort. A failure leaves the detection rules working on their
+ * own rather than stopping the session.
  */
 export function registerSessionStart(on: On, vault: Vault, options: Options) {
   on('session.start', async ($, e, next) => {
-    let registered = 0
-    let restored = 0
+    const restored = options.persist ? await restorePrevious($, vault, options) : 0
+    const registered = await loadEnvSecrets($, vault, e.cwd, options.envFiles)
 
-    if (options.persist) {
-      restored = await restorePrevious($, vault, options)
-    }
-
-    try {
-      registered = await loadEnvSecrets($, vault, e.cwd, options.envFiles)
-    } catch {
-      registered = 0
-    }
-
-    if (options.persist && (registered > 0 || restored > 0)) {
+    if (options.persist && vault.size > restored) {
       await save(portOf($), vault.entries())
     }
 
@@ -37,36 +30,20 @@ export function registerSessionStart(on: On, vault: Vault, options: Options) {
   })
 }
 
-function portOf($: EngineInterface): PersistPort {
-  return {
-    get: (key) => $.store.get(key),
-    set: (key, value) => $.store.set(key, value),
-    readFile: (path) => $.fs.read(path),
-  }
-}
-
 async function restorePrevious(
   $: EngineInterface,
   vault: Vault,
   options: Options,
 ): Promise<number> {
-  try {
-    const { pairs, entries } = await load(portOf($), options.retentionDays)
-    const byFake = new Map(entries.map((entry) => [entry.fake, entry]))
-    for (const [fake, secret] of pairs) {
-      const entry = byFake.get(fake)
-      vault.adopt(
-        fake,
-        secret,
-        entry?.kind === 'env'
-          ? { kind: 'env', file: entry.file, key: entry.key }
-          : { kind: 'literal' },
-      )
-    }
-    return pairs.length
-  } catch {
-    return 0
+  const resolved = await load(portOf($), options.retentionDays)
+  for (const { entry, secret } of resolved) {
+    vault.adopt(
+      entry.fake,
+      secret,
+      entry.kind === 'env' ? { file: entry.file, key: entry.key } : undefined,
+    )
   }
+  return resolved.length
 }
 
 /**
@@ -74,7 +51,7 @@ async function restorePrevious(
  *
  * A value qualifies on its name (`*_KEY`, `*_TOKEN`, …) or on its shape, so a
  * credential with an unremarkable name is still caught and `PORT=3000` is not.
- * The origin records the file and key, which lets the persistence layer store
+ * The source records the file and key, which lets the persistence layer store
  * a pointer instead of the secret itself.
  */
 async function loadEnvSecrets(
@@ -90,9 +67,9 @@ async function loadEnvSecrets(
     const text = await $.fs.read(path).catch(() => '')
     for (const [key, value] of parseEnv(text)) {
       if (value.length < MIN_SECRET_LEN) continue
-      if (!looksLikeSecret(key) && scan(value).length === 0) continue
+      if (!looksLikeSecret(key) && scanValues(value).size === 0) continue
       const before = vault.size
-      vault.register(value, { kind: 'env', file: path, key })
+      vault.register(value, { file: path, key })
       if (vault.size > before) count++
     }
   }
@@ -101,12 +78,9 @@ async function loadEnvSecrets(
 
 function summary(registered: number, restored: number, options: Options): string {
   const parts: string[] = []
-  if (registered > 0) {
-    parts.push(`${registered} from ${options.envFiles.join(', ')}`)
-  }
+  if (registered > 0) parts.push(`${registered} from ${options.envFiles.join(', ')}`)
   if (restored > 0) parts.push(`${restored} restored`)
-  if (parts.length === 0) {
-    return 'osm: masking on, no registered secrets (detection rules still apply)'
-  }
-  return `osm: masking ${parts.join(', ')}`
+  return parts.length === 0
+    ? 'osm: masking on, no registered secrets (detection rules still apply)'
+    : `osm: masking ${parts.join(', ')}`
 }

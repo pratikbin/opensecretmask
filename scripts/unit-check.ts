@@ -1,6 +1,6 @@
 // Unit checks for the pure logic, runnable without Claude Code:
 //
-//   bun run tests/unit.ts
+//   bun run scripts/unit-check.ts
 //
 // The engine-level tests live in register.test.ts and need `claude plugin
 // test .`. This file covers what that harness cannot reach cheaply: the
@@ -11,9 +11,10 @@ const { Vault } = await import(`${R}/vault/index.ts`)
 const { scan, RULES } = await import(`${R}/detect/index.ts`)
 const { parseEnv, parseValue } = await import(`${R}/env.ts`)
 const { isModelFacing, RESERVED } = await import(`${R}/policy/model-facing.ts`)
-const { restoreArgs, maskResult } = await import(`${R}/events/tool-call.ts`)
+const { inbound, outbound } = await import(`${R}/policy/boundary.ts`)
+const { isOpaque } = await import(`${R}/vault/walk.ts`)
 const { load, save, prune } = await import(`${R}/vault/persist.ts`)
-const { guard } = await import(`${R}/policy/budget.ts`)
+const { guard, guardAsync } = await import(`${R}/policy/budget.ts`)
 
 let pass = 0, fail = 0
 const ok = (n: string, c: boolean) => { c ? pass++ : fail++; console.log(`${c ? 'PASS' : 'FAIL'}  ${n}`) }
@@ -24,18 +25,20 @@ console.log(`rules: ${RULES.length}\n`)
 // F1 Agent.prompt keeps its fake
 {
   const v = new Vault(); const fake = v.maskOf(KEY)
-  const out: any = restoreArgs(v, { tool: 'Agent', prompt: `use ${fake}`, description: fake } as any)
-  ok('F1 Agent.prompt keeps the fake', !out.prompt.includes(KEY) && out.prompt.includes(fake))
-  const bash: any = restoreArgs(v, { tool: 'Bash', command: `curl -H "k: ${fake}"` } as any)
+  const agent: any = inbound(v, { tool: 'Agent', prompt: `use ${fake}`, description: fake } as any)
+  ok('F1 Agent.prompt keeps the fake', !agent.prompt.includes(KEY) && agent.prompt.includes(fake))
+  const ask: any = inbound(v, { tool: 'AskUserQuestion', questions: [{ q: fake }] } as any)
+  ok('F1 AskUserQuestion keeps the fake', ask.questions[0].q === fake)
+  const bash: any = inbound(v, { tool: 'Bash', command: `curl -H "k: ${fake}"` } as any)
   ok('F1 Bash.command still restored', bash.command.includes(KEY))
   ok('F1 agentId is reserved', RESERVED.has('agentId'))
-  ok('F1 isModelFacing(Agent,prompt)', isModelFacing('Agent', 'prompt') && !isModelFacing('Bash', 'command'))
+  ok('F1 keep-fakes table', isModelFacing('Agent', 'prompt') && isModelFacing('AskUserQuestion', 'questions') && !isModelFacing('Bash', 'command'))
 }
 
 // F3 tool-result context masked
 {
   const v = new Vault()
-  const up: any = maskResult(v, { result: {}, text: '', context: [`leaked ${KEY}`], ref: 7 } as any)
+  const up: any = outbound(v, { result: {}, text: '', context: [`leaked ${KEY}`], ref: 7 } as any)
   ok('F3 result.context masked', !up.context[0].includes(KEY))
   ok('F3 ref dropped on rewrite', up.ref === undefined)
 }
@@ -67,8 +70,16 @@ console.log(`rules: ${RULES.length}\n`)
 {
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQ=='
   const v = new Vault({ entropy: true, entropyThreshold: 4.0, entropyMinLen: 24 })
-  const out: any = v.maskDeep({ type: 'image', source: { data: png } })
-  ok('F9 base64 payload preserved', out.source.data === png)
+  const big = png.replace(/=+$/, '').repeat(60) + '=='   // >4KiB, padding only at the end
+  const out: any = v.maskDeep({ type: 'image', source: { data: big } })
+  ok('F9 large base64 payload preserved', out.source.data === big)
+  ok('F9 isOpaque(short base64) is false', !isOpaque(png))
+  // The regression: skipping by key name skipped the whole subtree.
+  const nested: any = v.maskDeep({ data: { apiKey: KEY }, payload: { token: KEY } })
+  ok('F9 secret under `data` IS masked', nested.data.apiKey !== KEY)
+  ok('F9 secret under `payload` IS masked', nested.payload.token !== KEY)
+  const back: any = v.unmaskDeep({ data: { cmd: v.maskOf(KEY) } })
+  ok('F9 fake under `data` restores', back.data.cmd === KEY)
 }
 
 // suppression: no FP on git SHA / UUID / Stripe public id
@@ -84,6 +95,12 @@ console.log(`rules: ${RULES.length}\n`)
   const v2 = new Vault(cfg)
   const named = `api_key = ${sha}`
   ok('SUP named key still masked', !v2.mask(named).includes(sha))
+  // The general "a credential name sits to the left" rule outranks the list.
+  const v3 = new Vault(cfg)
+  const prefixed = 'pi_9fX2qLmZ4vT7bN1cQ8wE3rY6uI0oP5aS'
+  ok('SUP bare public prefix kept', v3.mask(`id ${prefixed}`).includes(prefixed))
+  ok('SUP named public prefix masked', !new Vault(cfg).mask(`secret_key = ${prefixed}`).includes(prefixed))
+  ok('SUP pk_ stays public even when named', new Vault(cfg).mask('secret_key = pk_live_9fX2qLmZ4vT7bN1cQ8wE3rY6').includes('pk_live_9fX2qLmZ4vT7bN1cQ8wE3rY6'))
 }
 
 // walk depth bound
@@ -110,8 +127,8 @@ console.log(`rules: ${RULES.length}\n`)
     readFile: async (p: string) => p === '/p/.env' ? 'DB_PASSWORD=hunter2-correct-horse-staple\n' : '',
   }
   await save(port, entries)
-  const { pairs } = await load(port, 120)
-  ok('P env entry rebinds from .env', pairs.length === 1 && pairs[0][1] === 'hunter2-correct-horse-staple')
+  const resolved = await load(port, 120)
+  ok('P env entry rebinds from .env', resolved.length === 1 && resolved[0].secret === 'hunter2-correct-horse-staple')
 
   // literal entry does store the value, and expires
   const v2 = new Vault(); v2.register(KEY)
@@ -124,10 +141,10 @@ console.log(`rules: ${RULES.length}\n`)
 // budget: a hung hook denies instead of being skipped
 {
   const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
-  const hung = guard(() => new Promise(() => {}), () => 'DENIED', sleep, 50)
-  ok('B hung work falls back', (await hung) === 'DENIED')
-  ok('B throwing work falls back', (await guard(async () => { throw new Error('x') }, () => 'DENIED', sleep, 50)) === 'DENIED')
-  ok('B fast work wins', (await guard(async () => 'OK', () => 'DENIED', sleep, 500)) === 'OK')
+  ok('B sync throw falls back', guard(() => { throw new Error('x') }, () => 'DENIED') === 'DENIED')
+  ok('B sync ok wins', guard(() => 'OK', () => 'DENIED') === 'OK')
+  ok('B async hung falls back', (await guardAsync(() => new Promise(() => {}), () => 'DENIED', sleep, 50)) === 'DENIED')
+  ok('B async fast wins', (await guardAsync(async () => 'OK', () => 'DENIED', sleep, 500)) === 'OK')
 }
 
 // round trip still works

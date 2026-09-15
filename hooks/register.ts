@@ -1,5 +1,6 @@
 import type { On, PluginOptions } from 'claude-code'
 
+import { registerAgentSpawn } from './events/agent-spawn'
 import { registerPrompt } from './events/prompt'
 import { registerSessionStart } from './events/session-start'
 import { registerToolCall } from './events/tool-call'
@@ -22,5 +23,6 @@ export function register(on: On, options: PluginOptions) {
 
   registerSessionStart(on, vault, opts)
   registerToolCall(on, vault, opts)
+  registerAgentSpawn(on, vault)
   registerPrompt(on, vault)
 }

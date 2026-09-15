@@ -34,15 +34,18 @@ inside the clone itself, that is `--plugin-dir .`.
 | `prompt.submit` | user → model | Masks the typed prompt and its context blocks |
 | `prompt.context` | files → model | Masks `claudeMd`, where instruction files land |
 | `prompt.section` | memory → model | Masks `memory` and the other prompt sections |
+| `agent.spawn` | model → model | Masks the task text handed to a subagent |
 
 One `tool.call` registration covers Read, Bash, Grep, WebFetch, Write, the
 Agent tool and every MCP tool, because it matches the event rather than a list
 of tool names.
 
-**Model-facing arguments keep their fakes.** `Agent.prompt` is task text read
-by another model, so restoring it would hand a subagent the real credential.
-The rule is: restore at an external-operation boundary, never at a model-facing
-one. See `hooks/policy/model-facing.ts`.
+**Model-facing arguments keep their fakes.** Restoring a fake is for external
+boundaries — a `Bash` curl, a `Write` — never for a value another model reads.
+Two layers enforce that: `agent.spawn` masks the task text of every subagent
+dispatch whatever tool triggered it, and `policy/model-facing.ts` stops the
+real value materialising in the Agent tool's recorded arguments on the way
+there.
 
 ## Detection
 
@@ -114,11 +117,11 @@ hooks/
   options.ts           plugin settings
   env.ts               .env parsing (comment-aware)
   events/              one file per engine event
-    session-start.ts  tool-call.ts  prompt.ts
+    session-start.ts  tool-call.ts  prompt.ts  agent-spawn.ts
   vault/
     index.ts           the two-way map
     garble.ts          the format-preserving fake
-    walk.ts            bounded deep traversal, binary-safe
+    walk.ts            bounded traversal, opaque-payload aware
     persist.ts         $.store backing, opt-in
   detect/
     index.ts           the scanner
@@ -127,8 +130,9 @@ hooks/
     suppress.ts        false-positive suppression
     rules/             builtin llm cloud chat git devtools
   policy/
+    boundary.ts        outbound/inbound, the one place `ref` is stripped
     model-facing.ts    arguments that keep their fakes
-    budget.ts          self-imposed deadline
+    budget.ts          failure fallbacks
 ```
 
 `types/claude-code.d.ts` is the engine's own declaration file, written by
@@ -141,9 +145,10 @@ Every hook fails closed. The engine *skips* a hook that throws or overruns its
 time budget and runs core in its place, which for a masking hook is worse than
 not being installed at all — the unmasked content goes straight through.
 
-A local `try`/`catch` cannot see a timeout, so each hook races its own work
-against an 8 s deadline, comfortably inside the engine's, and returns a deny or
-a drop before the skip can fire. A visible refusal beats an invisible leak.
+Each hook therefore answers for itself rather than letting the engine answer.
+The deadline covers *our* work only and never a `next()` call — charging the
+hooks beneath us to our budget would drop the user's prompt whenever some other
+plugin is slow. A visible refusal beats an invisible leak.
 
 A rewritten tool result also drops `ref`, which names the messages core already
 built from the unmasked content.
@@ -151,7 +156,7 @@ built from the unmasked content.
 ## Tests
 
 ```sh
-bun run scripts/unit-check.ts   # 31 checks, no Claude Code needed
+bun run scripts/unit-check.ts   # 40 checks, no Claude Code needed
 claude plugin test .            # engine-level hook tests
 npx --yes --package typescript@5 tsc -p tsconfig.json
 bash scripts/local-e2e.sh       # real end-to-end run on your own account
@@ -174,6 +179,9 @@ against OpenRouter.
 - **Secret-shaped JSON property names are not masked.** Values only. Rewriting
   keys needs collision handling in both directions and risks corrupting real
   structures, for a case that barely occurs.
+- **Masking cost grows with the number of known secrets.** Each string is
+  tested against every secret the vault holds. Fine at the usual scale; with
+  `persist` on and a long retention it is worth watching.
 - **A classic hook downstream of us sees the real value.** Its stdout is
   written verbatim into the session transcript, so a `PreToolUse` hook that
   echoes its rewritten input puts the restored credential on disk.

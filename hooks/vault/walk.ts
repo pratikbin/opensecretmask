@@ -1,21 +1,12 @@
-/**
- * Property names whose value is an opaque blob, never text to scan.
- *
- * An MCP image result carries base64 under one of these. Running a
- * substitution over it corrupts the payload while protecting nothing, because
- * a PNG is not a credential. Adapted from
- * ray-amjad/awesome-claude-code-function-hooks (MIT).
- */
-export const SKIP_KEYS = new Set([
-  'data',
-  'base64',
-  'b64_json',
-  'imageData',
-  'thumbnail',
-  'bytes',
-  'blob',
-  'buffer',
-])
+// Deep traversal of a tool result or argument tree.
+//
+// The hard-won rule here: "this is an opaque payload" is a property of the
+// STRING, not of the key its parent filed it under. An earlier version gated
+// on a list of key names (`data`, `base64`, …) and skipped the whole subtree,
+// which meant `{ data: { apiKey: "sk-ant-…" } }` — the commonest JSON envelope
+// shape there is — reached the model completely unmasked, and a fake the model
+// placed anywhere under `data` never restored. A fix for garbled images became
+// a leak. Test it at the leaf instead: nothing is ever skipped structurally.
 
 /** Past this depth a result is pathological, not data. */
 export const MAX_DEPTH = 12
@@ -23,11 +14,36 @@ export const MAX_DEPTH = 12
 /** Past this length a string is a payload, not prose. */
 export const MAX_STRING = 8_000_000
 
+/** Long enough that a substitution is not worth the risk of corrupting a blob. */
+const OPAQUE_MIN = 4096
+
+/** Base64 and base64url, the encodings a binary payload actually arrives in. */
+const BASE64_ONLY = /^[A-Za-z0-9+/_-]+={0,2}$/
+
+/** A data: URI carries its own payload after the comma. */
+const DATA_URI = /^data:[\w.+-]+\/[\w.+-]+;base64,/
+
+/**
+ * Whether `s` is an encoded payload rather than text worth scanning.
+ *
+ * A credential is short. A PNG, a PDF or an audio buffer is long, unbroken and
+ * drawn from the base64 alphabet. Requiring all three keeps `apiKey` values in
+ * play at any nesting depth while leaving real blobs untouched.
+ */
+export function isOpaque(s: string): boolean {
+  if (s.length < OPAQUE_MIN) return false
+  if (DATA_URI.test(s)) return true
+  // Whitespace means prose, a log, or a file listing: still worth scanning.
+  if (/\s/.test(s)) return false
+  return BASE64_ONLY.test(s)
+}
+
 /**
  * `value` with `fn` applied to every string in it, at any depth.
  *
- * Returns the original object identity when nothing changed, so a caller can
- * tell a rewrite from a pass-through and avoid a pointless copy.
+ * Returns the original identity when nothing changed, so a caller can tell a
+ * rewrite from a pass-through. The replacement node is allocated lazily, on
+ * the first child that actually changes.
  *
  * Property NAMES are left alone. Rewriting keys would need collision handling
  * in both directions and risks corrupting a real structure, for a case that
@@ -35,33 +51,33 @@ export const MAX_STRING = 8_000_000
  */
 export function walk<T>(value: T, fn: (s: string) => string, depth = 0): T {
   if (typeof value === 'string') {
-    return (value.length > MAX_STRING ? value : fn(value)) as T
+    if (value.length > MAX_STRING || isOpaque(value)) return value
+    return fn(value) as T
   }
   if (depth >= MAX_DEPTH) return value
 
   if (Array.isArray(value)) {
-    let changed = false
-    const out = value.map((item) => {
-      const next = walk(item, fn, depth + 1)
-      if (next !== item) changed = true
-      return next
-    })
-    return (changed ? out : value) as T
+    let out: unknown[] | undefined
+    for (let i = 0; i < value.length; i++) {
+      const next = walk(value[i], fn, depth + 1)
+      if (next === value[i]) {
+        out?.push(next)
+        continue
+      }
+      out ??= value.slice(0, i)
+      out.push(next)
+    }
+    return (out ?? value) as T
   }
 
   if (value !== null && typeof value === 'object') {
-    let changed = false
-    const out: Record<string, unknown> = {}
+    let out: Record<string, unknown> | undefined
     for (const [key, item] of Object.entries(value)) {
-      if (SKIP_KEYS.has(key)) {
-        out[key] = item
-        continue
-      }
       const next = walk(item, fn, depth + 1)
-      if (next !== item) changed = true
-      out[key] = next
+      if (next !== item) out ??= { ...(value as Record<string, unknown>) }
+      if (out) out[key] = next
     }
-    return (changed ? out : value) as T
+    return (out ?? value) as T
   }
 
   return value
