@@ -157,7 +157,7 @@ built from the unmasked content.
 
 ```sh
 bun run scripts/unit-check.ts   # 40 checks, no Claude Code needed
-claude plugin test .            # engine-level hook tests
+bun run scripts/hook-check.ts   # 12 hook-level checks
 npx --yes --package typescript@5 tsc -p tsconfig.json
 bash scripts/local-e2e.sh       # real end-to-end run on your own account
 ```

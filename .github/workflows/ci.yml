@@ -13,5 +13,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Typecheck hooks and tests
+      - name: Typecheck hooks
         run: npx --yes --package typescript@5 tsc -p tsconfig.json
+
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Pure-logic checks
+        run: bun run scripts/unit-check.ts
+      - name: Hook-level checks
+        run: bun run scripts/hook-check.ts
