@@ -1,9 +1,10 @@
-import type { On, ToolCallInput, ToolCallResult } from 'claude-code'
+import type { EngineInterface, On, ToolCallInput, ToolCallResult } from 'claude-code'
 
 import { inbound, outbound } from '../policy/boundary'
 import { guard } from '../policy/budget'
 import type { Options } from '../options'
-import { portOf, save } from '../vault/persist'
+import type { PersistPort } from '../vault/persist'
+import { save } from '../vault/persist'
 import type { Vault } from '../vault'
 
 export const DENY_MASK =
@@ -46,4 +47,13 @@ export function registerToolCall(on: On, vault: Vault, options: Options) {
     }
     return masked
   })
+}
+
+/** Built here, not imported: the hook validator follows `$` only within a file. */
+function portOf($: EngineInterface): PersistPort {
+  return {
+    get: (key) => $.store.get(key),
+    set: (key, value) => $.store.set(key, value),
+    readFile: (path) => $.fs.read(path),
+  }
 }
