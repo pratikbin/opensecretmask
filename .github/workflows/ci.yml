@@ -1,56 +1,17 @@
-name: CI
+name: ci
 
 on:
   push:
-    branches: [master]
+    branches: [master, main]
   pull_request:
-  schedule:
-    # Weekly run catches new CVEs via govulncheck and toolchain drift.
-    - cron: "0 6 * * 1"
-
-permissions:
-  contents: read
 
 jobs:
-  build-test:
+  typecheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-node@v4
         with:
-          go-version-file: .tool-versions
-      - run: go build ./...
-      - run: go test -race -count=1 ./...
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: .tool-versions
-      - uses: golangci/golangci-lint-action@v8
-        with:
-          version: v2.6.0
-
-  security:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: .tool-versions
-      - name: gosec
-        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.26.1 ./...
-      - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.3.0 ./...
-
-  integration:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Run integration tests
-        run: make test-integration
+          node-version: '22'
+      - name: Typecheck hooks and tests
+        run: npx --yes typescript@5 tsc -p tsconfig.json
