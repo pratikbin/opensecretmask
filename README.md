@@ -24,8 +24,9 @@ character classes of the real value, so `sk-ant-api03-Xk9…` becomes
 reasons. A same-shaped fake tells it "this is an Anthropic key", so it writes
 the same command it would have written anyway.
 
-Nothing is written to disk by default. The map of fake to real value lives in
-memory and dies with the session.
+Nothing of the plugin's own is written to disk by default. The map of fake to
+real value lives in memory and dies with the session. For the full account of
+what is stored where, read [Where your secrets live](#where-your-secrets-live).
 
 ## Who this is for
 
@@ -128,18 +129,28 @@ Adding a rule is one line in one file. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Configuration
 
-Plugin options, with their defaults:
+Set an option with `/config` inside Claude Code, or write it into
+`settings.json` under `pluginConfigs`:
 
 ```json
 {
-  "entropy": false,
-  "entropyThreshold": 4.0,
-  "entropyMinLen": 24,
-  "envFiles": [".env", ".env.local"],
-  "persist": false,
-  "retentionDays": 120
+  "pluginConfigs": {
+    "osm": {
+      "options": {
+        "entropy": false,
+        "entropyThreshold": 4.0,
+        "entropyMinLen": 24,
+        "envFiles": [".env", ".env.local"],
+        "persist": false,
+        "retentionDays": 120
+      }
+    }
+  }
 }
 ```
+
+The values above are the defaults. The plugin key is `osm`, or `osm@inline`
+when you load it with `--plugin-dir`.
 
 | Option | What it does |
 | --- | --- |
@@ -158,30 +169,118 @@ object ids (Stripe `pk_` and `price_`, YouTube channel ids) out of the results
 unless a credential name sits immediately to their left. Turn it on when you
 would rather over-mask than miss something.
 
-## Persistence
+## Where your secrets live
 
-The map lives in memory and dies with one load of the plugin. That is safe, but
-it breaks `--resume`. The replayed transcript is full of fakes that the new map
-has never seen, so a tool call built around one runs against an invalid
-credential. Nothing leaks. The command just fails.
+By default `osm` stores nothing. The map of fake to real value is a `Map` in
+the plugin's memory, for one load of the plugin. It is never written anywhere,
+and it dies with the session. Your real secrets stay where they already were:
+in `.env`, in the output of a tool, in your shell.
 
-With `persist: true` the map is written to `$.store`, which is the plugin's own
-JSON file under the Claude Code configuration directory. Entries come in two
-kinds, and the split is the point:
+Three places hold a real credential while you use the plugin. Only the first is
+the plugin's own.
+
+### 1. The vault, in memory
+
+`hooks/vault/index.ts`. Two maps, secret to fake and fake back to secret. No
+file, no keychain, no network, no encryption, because there is nothing at rest
+to encrypt. A `/clear` or a `/compact` keeps it. A reload, a fork or a
+`--resume` starts an empty one, which is why an old fake no longer restores.
+
+### 2. The store, only when `persist` is on
+
+`persist: true` writes the map through `$.store`, which is a plain JSON file:
+
+```
+~/.claude/plugins/store/osm_inline-<hash>.json      mode 644
+~/.claude/plugins/store/                            mode 755
+```
+
+The file name carries the plugin key, so an installed `osm` and a
+`--plugin-dir` `osm@inline` keep separate files. Measured on a fresh box: 497
+bytes for two entries.
+
+Entries come in two kinds, and the split is the point:
 
 | Kind | Stored | Expires |
 | --- | --- | --- |
 | `env` | the fake plus a pointer to `{file, key}` | never, because the source is re-read |
 | `literal` | the fake **and the secret** | after `retentionDays` |
 
-A `.env` secret is already on disk, so storing a pointer to it puts nothing new
-at rest and needs no expiry. A secret first seen in tool output exists nowhere
-else, so restoring it later means storing the value itself. That is the only
-kind that creates new exposure, and the only kind the retention window applies
-to.
+A `.env` secret is already on your disk, so storing a pointer to it puts
+nothing new at rest. A secret first seen in tool output exists nowhere else, so
+restoring it later means storing the value itself. That is the only kind that
+creates new exposure, and the only kind the retention window applies to. A run
+that registered one of each confirmed it: the `.env` password does not appear
+in the file, the literal one does.
 
-The store is plaintext and the plugin cannot set its file mode. Leave `persist`
-off if that matters more to you than resuming a session.
+**The file is world-readable and the plugin cannot change that.** `$.fs` has no
+chmod, and the engine writes the file with mode 644. Anyone with an account on
+the machine can read it.
+
+### 3. The session transcript, which the engine owns
+
+```
+~/.claude/projects/<slugged-cwd>/<session-id>.jsonl   mode 600
+~/.claude/projects/                                   mode 755
+```
+
+Masked values are what the model saw, so the transcript is mostly fakes. Two
+records can still carry the real value, and both were confirmed by grepping
+real transcripts from this project's own test runs:
+
+- `type: "attachment"` with `attachment.type: "hook_success"`. A classic hook's
+  stdout, recorded verbatim. If you run a `PreToolUse` hook that echoes the
+  command it rewrote, the restored credential lands here.
+- `type: "queue-operation"` with `operation: "enqueue"`. The prompt exactly as
+  you typed it, written before `prompt.submit` masking runs. The model receives
+  the fake. The disk keeps what you typed.
+
+So a secret you paste into a prompt is masked for the model and still written
+to the transcript. That is the engine's record of your input, not something a
+hook can rewrite.
+
+## Hardening this on a Mac
+
+In order of how much they buy you.
+
+**Leave `persist` off.** It is the default. Nothing of the plugin's own reaches
+the disk, and the only remaining exposure is the transcript, which you have
+with or without this plugin.
+
+**Tighten the directories, which is durable.** The engine rewrites the store
+file and resets its mode, but it does not touch the mode of the directories
+above it:
+
+```sh
+chmod 700 ~/.claude ~/.claude/projects ~/.claude/plugins/store
+```
+
+A `700` directory stops another account on the Mac from reaching the files
+inside it, whatever mode the files carry.
+
+**Turn on FileVault.** System Settings, Privacy and Security, FileVault. It
+protects `~/.claude` when the Mac is off or stolen. It does nothing while you
+are logged in, which is the point of the directory modes above.
+
+**Keep the transcripts out of backups you do not control.**
+
+```sh
+tmutil addexclusion ~/.claude/projects
+```
+
+Do the same for any cloud-sync folder. A transcript copied into a synced
+directory is a credential copied into someone else's storage.
+
+**Shorten the window and clean up.** `retentionDays` bounds how long a literal
+secret survives. Deleting the store file is safe at any time: the plugin
+rebuilds what it can from `.env` and simply mints new fakes for the rest.
+
+```sh
+rm -f ~/.claude/plugins/store/osm_*.json
+```
+
+**Rotate what has already been in a transcript.** No file mode retroactively
+protects a credential that sat in a `.jsonl` on a shared or backed-up disk.
 
 ## What this does not protect against
 
@@ -215,7 +314,11 @@ your machine.
   With `persist` on and a long retention window it is worth watching.
 - **A classic hook downstream of this one sees the real value.** Its stdout is
   written verbatim into the session transcript, so a `PreToolUse` hook that
-  echoes its rewritten input puts the restored credential on disk.
+  echoes its rewritten input puts the restored credential on disk. See
+  [Where your secrets live](#where-your-secrets-live).
+- **A secret you type is masked for the model and still recorded.** The engine
+  writes the prompt as you typed it into the transcript before the masking hook
+  runs.
 
 ## Failure behavior
 

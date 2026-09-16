@@ -75,6 +75,14 @@ one leaves a live channel.
 `context` — the last carries a PostToolUse hook's additional text straight to
 the model where the user never sees it.
 
+**An option reaches the plugin only if the manifest declares it.**
+`register(on, options)` receives the fields of `.claude-plugin/plugin.json`'s
+`userConfig`, and nothing else. Without that block the engine passes `{}`, a
+user's `pluginConfigs.osm.options` is ignored, and every option silently uses
+its default. Every option here was dead until 2026-09-16 for exactly that
+reason. Adding an option means adding it in two places: `hooks/options.ts` and
+`userConfig`.
+
 **`agentId` is camelCase.** The classic-hook spelling `agent_id` reads
 `undefined`.
 
@@ -110,7 +118,10 @@ already in `.env` and gets re-read. A `literal` entry stores the value itself
 and expires after `retentionDays` (default 120). Only `literal` puts a
 previously-transient secret at rest, which is why only it has a window.
 
-The store is plaintext and the plugin cannot chmod it — `$.fs` has no chmod.
+The store is `~/.claude/plugins/store/osm_<key>-<hash>.json`, written with mode
+644 in a 755 directory. The plugin cannot change either: `$.fs` has no chmod.
+README's "Hardening this on a Mac" tells the user to tighten the directories
+instead, because the engine rewrites the file.
 
 ## Build and test
 

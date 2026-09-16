@@ -5,5 +5,50 @@
   "author": {
     "name": "pratikbin"
   },
-  "keywords": ["security", "secrets", "redaction", "privacy", "function-hooks"]
+  "keywords": ["security", "secrets", "redaction", "privacy", "function-hooks"],
+  "userConfig": {
+    "entropy": {
+      "type": "boolean",
+      "title": "Entropy layer",
+      "description": "Mask high-entropy tokens that no pattern matches. Catches vendors with no rule, and can mask a random-looking URL path.",
+      "default": false
+    },
+    "entropyThreshold": {
+      "type": "number",
+      "title": "Entropy threshold",
+      "description": "Bits per character above which a string counts as random.",
+      "default": 4,
+      "min": 1,
+      "max": 8
+    },
+    "entropyMinLen": {
+      "type": "number",
+      "title": "Entropy minimum length",
+      "description": "Shortest string the entropy layer will consider.",
+      "default": 24,
+      "min": 8,
+      "max": 512
+    },
+    "envFiles": {
+      "type": "string",
+      "title": "Env files",
+      "description": "Files read at session start for the exact-match layer, relative to the session's directory.",
+      "multiple": true,
+      "default": [".env", ".env.local"]
+    },
+    "persist": {
+      "type": "boolean",
+      "title": "Persist the map",
+      "description": "Carry the fake-to-secret map across a resume, a fork or a reload. Writes a plaintext file under the Claude Code configuration directory.",
+      "default": false
+    },
+    "retentionDays": {
+      "type": "number",
+      "title": "Retention days",
+      "description": "How long a stored literal secret survives. Env-backed entries store no secret and never expire.",
+      "default": 120,
+      "min": 1,
+      "max": 3650
+    }
+  }
 }

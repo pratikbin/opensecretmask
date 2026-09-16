@@ -146,6 +146,13 @@ messages the engine already built. Return that `ref` and the engine uses those
 messages, which are the unmasked ones. A rewritten result must answer without
 it. `hooks/policy/boundary.ts` is the one place that strips it.
 
+**An option must be declared in the manifest.** `register(on, options)`
+receives the fields that `.claude-plugin/plugin.json`'s `userConfig` declares,
+and nothing else. A new option therefore lands in two places: `hooks/options.ts`
+reads it, and `userConfig` declares its type, title, description and default.
+Skip the second and the engine passes `{}`, so the option silently keeps its
+default however the user sets it.
+
 **`$` never crosses an import boundary.** The engine's validator follows `$`
 only inside the file that declares the function. Passing `$` to a function from
 another module makes `claude plugin validate` reject the whole module, and then
