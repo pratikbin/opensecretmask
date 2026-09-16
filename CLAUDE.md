@@ -46,7 +46,7 @@ Everything else in this codebase is negotiable. That is not.
 Adding a rule source is one file in `rules/` plus one line in `rules/index.ts`.
 No registry, no init-time side effects.
 
-`types/claude-code.d.ts` (10.7k lines) is the engine's own declaration file
+`types/claude-code.d.ts` (13.1k lines) is the engine's own declaration file
 from `/plugin-types`, vendored so CI typechecks without a Claude Code install.
 Not our code. `.gitattributes` marks it `linguist-generated`. Refresh it when
 the engine API moves.
@@ -127,8 +127,8 @@ instead, because the engine rewrites the file.
 ## Build and test
 
 ```sh
-bun run scripts/unit-check.ts                          # 52 pure-logic checks
-bun run scripts/hook-check.ts                          # 12 hook-level checks
+bun run scripts/unit-check.ts                          # 55 pure-logic checks
+bun run scripts/hook-check.ts                          # 18 hook-level checks
 npx --yes --package typescript@5 tsc -p tsconfig.json  # NB: --package, see below
 bash scripts/local-e2e.sh                              # real model, 3 passes
 bash scripts/scenario-e2e.sh                           # 11 scenarios in tmux, 25 checks
