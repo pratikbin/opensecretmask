@@ -169,6 +169,7 @@ guards this.
 | `claude plugin validate .claude-plugin/plugin.json` | The engine accepts the module | Claude Code |
 | `bash scripts/local-e2e.sh` | One round trip against a real model | Claude Code, money |
 | `bash scripts/scenario-e2e.sh` | Every channel and the fail cases | Claude Code, tmux, jq, money |
+| `cos offload … 'bash /work/scripts/sandbox-scenarios.sh'` | The same matrix in a disposable box | CreateOS, OpenRouter |
 
 The first four are the ones a pull request must pass. The last two cost real
 model calls, so run them when you change a hook rather than a rule.

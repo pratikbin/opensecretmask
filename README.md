@@ -250,8 +250,19 @@ bash scripts/scenario-e2e.sh    # 11 scenarios in parallel tmux windows, 25 chec
 unknown fake must not be restored, a sabotaged `mask()` must refuse rather than
 let the engine serve the real result, and the hooks module must still validate.
 It prints tokens, cost and subagent counts per scenario.
-`scripts/sandbox-e2e.sh` runs the same round trip in a disposable Linux box
-against OpenRouter.
+`scripts/sandbox-e2e.sh` runs one round trip in a disposable Linux box against
+OpenRouter, and `scripts/sandbox-scenarios.sh` runs the whole matrix there. The
+box-side wrapper installs tmux and jq, upgrades Claude Code to a version that
+has function hooks, and repoints the model at OpenRouter:
+
+```sh
+export OPENROUTER_API_KEY=…            # in your own shell, never in a prompt
+cos offload -s s-2vcpu-4gb -v OPENROUTER_API_KEY -o matrix.log . \
+    'bash /work/scripts/sandbox-scenarios.sh'
+```
+
+The matrix passed 25 of 25 there on `anthropic/claude-sonnet-4.5` and again on
+`anthropic/claude-haiku-4.5`.
 
 ## Project layout
 

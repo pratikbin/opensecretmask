@@ -22,3 +22,6 @@ package.json
 skills-lock.json
 ONBOARDING.md
 docs/
+
+# Logs pulled back from a sandbox run
+matrix-*.log
