@@ -146,6 +146,30 @@ console.log(`rules: ${RULES.length}\n`)
   ok('B async fast wins', (await guardAsync(async () => 'OK', () => 'DENIED', sleep, 500)) === 'OK')
 }
 
+// rules recovered from the Go proxy's detector, plus the PGP header it caught
+// and the plugin did not
+{
+  const hit = (label: string, text: string) =>
+    ok(`PX ${label}`, new Vault().mask(text) !== text)
+  hit('PGP block', '-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQOYBGXyz1kBCADP3n2VqK8\n-----END PGP PRIVATE KEY BLOCK-----')
+  hit('Terraform Cloud', 'AbCdEf12345678.atlasv1.' + 'z'.repeat(70))
+  hit('Sentry DSN', 'https://a1b2c3d4e5f60718293a4b5c6d7e8f90@o12345.ingest.sentry.io/678901')
+  hit('Atlassian token', 'ATATT3xFfGF0' + 'a'.repeat(185))
+  hit('Notion legacy secret', 'secret_' + 'a'.repeat(43))
+  hit('Bearer header', 'Authorization: Bearer abcdef1234567890ABCDEFghijkl')
+  hit('access_token in URL', 'https://api.example.com/v1/x?access_token=abcdef1234567890ABCDEF')
+  hit('Twilio account SID', 'ACa1b2c3d4e5f60718293a4b5c6d7e8f90')
+  // The DSN keeps its shape: only the key half is masked.
+  const dsn = new Vault().mask('https://a1b2c3d4e5f60718293a4b5c6d7e8f90@o12345.ingest.sentry.io/678901')
+  ok('PX Sentry DSN keeps the host', dsn.includes('@o12345.ingest.sentry.io/678901'))
+  // And the new rules do not fire on ordinary text.
+  const keep = (label: string, text: string) =>
+    ok(`PX keeps ${label}`, new Vault().mask(text) === text)
+  keep('a bare Authorization line', 'Authorization: Bearer')
+  keep('a sentry issue URL', 'https://sentry.io/organizations/acme/issues/12345')
+  keep('an ordinary query string', 'https://example.com/docs?page=2&sort=name')
+}
+
 // round trip still works
 {
   const v = new Vault()

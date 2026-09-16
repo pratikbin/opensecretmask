@@ -38,4 +38,9 @@ export const cloudRules: Rule[] = [
   rule('SaladCloud API Key', 'critical', /salad_cloud_[0-9A-Za-z]{1,7}_[0-9A-Za-z]{7,235}/g),
   rule('Supabase Personal Access Token', 'critical', /sbp_[0-9a-z]{40}/g),
   rule('Artifactory Reference Token', 'critical', /cmVmdGtu[0-9A-Za-z]{56}/g),
+  // The organisation id sits before `.atlasv1.`, so only the token half is
+  // masked and the value stays recognisable as a Terraform Cloud token.
+  rule('Terraform Cloud Token', 'critical', /[A-Za-z0-9]{14}\.atlasv1\.([A-Za-z0-9_-]{60,})/g, 1),
+  // A Sentry DSN is a URL whose user part is the key. Group 1 keeps the URL.
+  rule('Sentry DSN', 'high', /https:\/\/([a-f0-9]{32})@[\w.-]+\/\d+/g, 1),
 ]

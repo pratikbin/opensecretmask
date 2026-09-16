@@ -56,9 +56,16 @@ Two layers.
 its shape, so a credential with a dull name is still caught and `PORT=3000`
 stays readable.
 
-**Detection rules** are best-effort: 140 prefix-distinctive patterns in six
-groups under `hooks/detect/rules/`. No allowlists, no anchors, so they behave
-the same in JSON, in file contents and in bare tokens.
+**Detection rules** are best-effort: 146 patterns in six groups under
+`hooks/detect/rules/`, covering about 96 vendors. No allowlists, no anchors,
+so they behave the same in JSON, in file contents and in bare tokens.
+
+Most are gated on a literal vendor prefix, but thirteen are shape or context
+rules, and those cover far more ground than a vendor count suggests: a
+credential in a URL or a connection string, an `Authorization: Bearer` header,
+an assignment such as `DD_API_KEY=…`, a PEM or PGP private key block, a JWT.
+A vendor with no rule of its own is usually caught by one of those, and the
+`.env` layer covers a secret with no shape at all.
 
 A value caught once is remembered, so a secret first matched by a
 context-bearing rule (`aws_secret_access_key = "…"`) is still masked when it
@@ -156,7 +163,7 @@ built from the unmasked content.
 ## Tests
 
 ```sh
-bun run scripts/unit-check.ts   # 40 checks, no Claude Code needed
+bun run scripts/unit-check.ts   # 52 checks, no Claude Code needed
 bun run scripts/hook-check.ts   # 12 hook-level checks
 npx --yes --package typescript@5 tsc -p tsconfig.json
 bash scripts/local-e2e.sh       # real end-to-end run on your own account

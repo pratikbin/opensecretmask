@@ -61,10 +61,13 @@ export const builtinRules: Rule[] = [
   rule('Sentry Auth Token', 'high', /sntrys_[a-zA-Z0-9]{40,}/g),
   // The whole block, BEGIN through END. A header-only match leaves the key
   // material intact and the header is trivially reconstructible.
+  //
+  // The trailing `[^\n-]{0,10}` carries PGP, whose header reads
+  // `BEGIN PGP PRIVATE KEY BLOCK` and so does not end at `PRIVATE KEY`.
   rule(
     'Private Key Block',
     'critical',
-    /-----BEGIN[^\n-]{0,40}PRIVATE KEY-----[\s\S]{0,20000}?-----END[^\n-]{0,40}PRIVATE KEY-----/g,
+    /-----BEGIN[^\n-]{0,40}PRIVATE KEY[^\n-]{0,10}-----[\s\S]{0,20000}?-----END[^\n-]{0,40}PRIVATE KEY[^\n-]{0,10}-----/g,
   ),
   rule('JWT Token', 'high', /(ey[a-zA-Z0-9_\-=]{10,}\.){2}[a-zA-Z0-9_\-=]{10,}/g),
   rule('Extended Private Key', 'critical', /[xyzt]prv[1-9A-HJ-NP-Za-km-z]{107,108}/g),
@@ -78,7 +81,7 @@ export const builtinRules: Rule[] = [
   rule(
     'Credential in URL',
     'high',
-    /(?:^|[?&;])\s*(?:password|passwd|secret|token|apikey|api_key|api-key)\s*=\s*([^\s&]{4,})/gm,
+    /(?:^|[?&;])\s*(?:password|passwd|secret|access_token|token|auth|apikey|api_key|api-key)\s*=\s*([^\s&]{4,})/gm,
     1,
   ),
   // The password inside a connection string: postgres://user:PASSWORD@host.
@@ -89,6 +92,10 @@ export const builtinRules: Rule[] = [
     /\b[a-z][a-z0-9+.-]{1,20}:\/\/[^\s/@:]{1,80}:([^\s/@]{3,200})@/gi,
     1,
   ),
+  // `Authorization: Bearer <token>`, whatever vendor minted the token. Group 1
+  // alone is masked, so the header keeps its shape.
+  rule('Bearer Token Header', 'high', /Authorization:\s*Bearer\s+([A-Za-z0-9._~+/=-]{16,})/gi, 1),
+  rule('Twilio Account SID', 'medium', /AC[a-f0-9]{32}/g),
   rule(
     'Environment Variable Secret',
     'high',

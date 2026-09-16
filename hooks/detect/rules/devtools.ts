@@ -59,4 +59,7 @@ export const devtoolsRules: Rule[] = [
     /pat-(?:eu|na)1-[0-9A-Za-z]{8}-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}-[0-9A-Za-z]{12}/g,
   ),
   rule('FC API Key', 'critical', /skp_[a-zA-Z0-9]{32}/g),
+  rule('Atlassian API Token', 'critical', /ATATT[A-Za-z0-9_=-]{180,}/g),
+  // Notion's pre-2024 format. `ntn_` is the current one, above.
+  rule('Notion Internal Secret (legacy)', 'high', /secret_[A-Za-z0-9]{43}/g),
 ]
