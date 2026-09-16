@@ -159,6 +159,11 @@ console.log(`rules: ${RULES.length}\n`)
   hit('PX Atlassian token', 'ATATT3xFfGF0' + 'a'.repeat(185))
   hit('PX Notion legacy secret', 'secret_' + 'a'.repeat(43))
   hit('PX Bearer header', 'Authorization: Bearer abcdef1234567890ABCDEFghijkl')
+  // The scan gate is case-sensitive, so a case-insensitive rule must not be
+  // gated on its prefix. A lowercase header once went through unmasked.
+  hit('PX Bearer header, lowercase', 'authorization: bearer abcdef1234567890ABCDEFghijkl')
+  hit('PX Bearer header, mixed case', 'AUTHORIZATION: BEARER abcdef1234567890ABCDEFghijkl')
+  hit('PX connection string, uppercase scheme', 'POSTGRES://admin:hunter2horsebattery@db:5432/app')
   hit('PX access_token in URL', 'https://api.example.com/v1/x?access_token=abcdef1234567890ABCDEF')
   hit('PX Twilio account SID', 'ACa1b2c3d4e5f60718293a4b5c6d7e8f90')
   // The DSN keeps its shape: only the key half is masked.

@@ -180,6 +180,27 @@ sublogs(){
 echo
 echo "================ VERDICT ================"
 
+# Before any assertion: a pass that did not run is a failure, not a skip.
+#
+# Every check below is guarded by `ran`, which only asks whether JSON exists.
+# A timeout, a CLI error or an engine refusal leaves an empty file, every
+# assertion for that scenario is skipped, and the suite prints "failed 0" while
+# proving nothing. So account for each launched pass here first.
+for id in "${RUNNING[@]}"; do
+  code=$(cat "$OUT/$id.done" 2>/dev/null)
+  if [ "$code" != 0 ]; then
+    no "$(printf '%-8s' "$id") : the pass exited ${code:-(no marker)}: $(head -c 120 "$OUT/$id.err" 2>/dev/null)"
+    continue
+  fi
+  if ! ran "$id"; then
+    no "$(printf '%-8s' "$id") : the pass wrote no JSON"
+    continue
+  fi
+  if ! jq -e '.is_error == false and (.result | type == "string")' "$OUT/$id.json" >/dev/null 2>&1; then
+    no "$(printf '%-8s' "$id") : the pass returned an error or malformed JSON: $(jq -rc '{is_error, subtype, result}' "$OUT/$id.json" 2>/dev/null | head -c 120)"
+  fi
+done
+
 if ran control; then
   SAW_CTRL=$(field control SAW)
   [ "$SAW_CTRL" = "$REAL" ] && ok "control  : without the plugin the model read the real key" \
@@ -268,7 +289,10 @@ fi
 # module the engine rejects loads no hooks, and every other scenario then
 # reports the control's answer.
 if printf '%s\n' "${PICK[@]}" | grep -qx validate; then
-  vout=$(claude plugin validate "$PLUGIN" 2>&1)
+  # The manifest path, not the directory. A directory that also holds
+  # .claude-plugin/marketplace.json validates the marketplace ALONE and never
+  # looks at the hooks, so `validate .` would pass while the module is broken.
+  vout=$(claude plugin validate "$PLUGIN/.claude-plugin/plugin.json" 2>&1)
   echo "$vout" | grep -q 'Validation failed' \
     && no "validate : the engine rejects the hooks module, so no hook loads" \
     || ok "validate : the hooks module validates"
@@ -296,7 +320,7 @@ TS
     "$HERE/noload-plugin/hooks/events/session-start.ts"
   # Captured, not piped: `pipefail` would report the validator's own exit code
   # rather than whether the text matched.
-  nout=$(claude plugin validate "$HERE/noload-plugin" 2>&1)
+  nout=$(claude plugin validate "$HERE/noload-plugin/.claude-plugin/plugin.json" 2>&1)
   case "$nout" in
     *'Validation failed'*) ok "noload   : the validator still catches \$ crossing an import";;
     *) no "noload   : the validator no longer catches \$ crossing an import, so this class of no-op can ship";;

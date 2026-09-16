@@ -150,8 +150,14 @@ it. `hooks/policy/boundary.ts` is the one place that strips it.
 only inside the file that declares the function. Passing `$` to a function from
 another module makes `claude plugin validate` reject the whole module, and then
 no hook loads at all and the plugin silently does nothing. Build the adapter in
-the file that uses it. Run `claude plugin validate .` before you send a hook
-change. The `noload` scenario in `scripts/scenario-e2e.sh` guards this.
+the file that uses it.
+
+Run `claude plugin validate .claude-plugin/plugin.json` before you send a hook
+change. Pass the manifest and not the directory. This repository also holds
+`.claude-plugin/marketplace.json`, and a directory that has one validates the
+marketplace alone and never reads the hooks, so `validate .` would pass while
+the module is broken. The `noload` scenario in `scripts/scenario-e2e.sh`
+guards this.
 
 ## Tests
 
@@ -160,7 +166,7 @@ change. The `noload` scenario in `scripts/scenario-e2e.sh` guards this.
 | `bun run scripts/unit-check.ts` | Detection, vault, `.env`, persistence, budget | bun |
 | `bun run scripts/hook-check.ts` | The six hooks, through a fake engine | bun |
 | `npx --yes --package typescript@5 tsc -p tsconfig.json` | Types | npx |
-| `claude plugin validate .` | The engine accepts the module | Claude Code |
+| `claude plugin validate .claude-plugin/plugin.json` | The engine accepts the module | Claude Code |
 | `bash scripts/local-e2e.sh` | One round trip against a real model | Claude Code, money |
 | `bash scripts/scenario-e2e.sh` | Every channel and the fail cases | Claude Code, tmux, jq, money |
 

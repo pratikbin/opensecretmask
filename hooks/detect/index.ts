@@ -31,11 +31,17 @@ export type Finding = {
  * Carried together rather than in a parallel array indexed by position: a
  * filter or reorder of `RULES` would silently desync two arrays, and this
  * cannot.
+ *
+ * `prefix` is what a fake copies verbatim. `gate` is what the scan tests, and
+ * it is empty for a case-insensitive rule: `authorization:` and
+ * `Authorization:` are the same rule but not the same string, so gating one on
+ * the other drops the match and the credential reaches the model. Such a rule
+ * runs on every string, which is correct and costs one regex.
  */
-const GATED: ReadonlyArray<{ rule: Rule; prefix: string }> = RULES.map((rule) => ({
-  rule,
-  prefix: literalPrefix(rule.re.source),
-}))
+const GATED: ReadonlyArray<{ rule: Rule; prefix: string; gate: string }> = RULES.map((rule) => {
+  const prefix = literalPrefix(rule.re.source)
+  return { rule, prefix, gate: rule.re.flags.includes('i') ? '' : prefix }
+})
 
 /**
  * One alternation over every rule prefix, so a string is scanned once to learn
@@ -46,7 +52,7 @@ const GATED: ReadonlyArray<{ rule: Rule; prefix: string }> = RULES.map((rule) =>
  * ran. This turns that into one pass.
  */
 const PREFIX_GATE = new RegExp(
-  [...new Set(GATED.map((g) => g.prefix).filter(Boolean))]
+  [...new Set(GATED.map((g) => g.gate).filter(Boolean))]
     .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
     .join('|'),
   'g',
@@ -72,8 +78,8 @@ function run(text: string, cfg: DetectConfig, into: (value: string, rule?: Rule)
   PREFIX_GATE.lastIndex = 0
   const present = new Set(text.match(PREFIX_GATE) ?? [])
 
-  for (const { rule, prefix } of GATED) {
-    if (prefix !== '' && !present.has(prefix)) continue
+  for (const { rule, gate } of GATED) {
+    if (gate !== '' && !present.has(gate)) continue
     rule.re.lastIndex = 0
     for (const m of text.matchAll(rule.re)) {
       const value = m[rule.group]

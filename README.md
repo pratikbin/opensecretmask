@@ -235,7 +235,7 @@ some other plugin is slow. A visible refusal beats an invisible leak.
 bun run scripts/unit-check.ts   # 52 checks on the pure logic
 bun run scripts/hook-check.ts   # 12 checks on the hooks, through a fake engine
 npx --yes --package typescript@5 tsc -p tsconfig.json
-claude plugin validate .        # the engine must accept the hooks module
+claude plugin validate .claude-plugin/plugin.json   # the engine must accept the hooks
 ```
 
 Neither check script needs Claude Code installed. The two runs below do, and

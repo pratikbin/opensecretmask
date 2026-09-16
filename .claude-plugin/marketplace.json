@@ -5,9 +5,7 @@
   },
   "metadata": {
     "description": "Secret masking for Claude Code. A credential becomes a format-preserving fake before the model reads it.",
-    "version": "0.1.0",
-    "repository": "https://github.com/pratikbin/opensecretmask",
-    "homepage": "https://github.com/pratikbin/opensecretmask"
+    "version": "0.1.0"
   },
   "plugins": [
     {
@@ -18,7 +16,13 @@
       "author": {
         "name": "pratikbin"
       },
-      "keywords": ["security", "secrets", "redaction", "privacy", "function-hooks"]
+      "keywords": [
+        "security",
+        "secrets",
+        "redaction",
+        "privacy",
+        "function-hooks"
+      ]
     }
   ]
 }
