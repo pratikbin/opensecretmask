@@ -1,84 +1,164 @@
-# CLAUDE.md
+# osm — project notes
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+A Claude Code plugin that swaps secrets for format-preserving fakes before the
+model reads them, and restores the real value on the way into a tool call.
 
-## Build / Test / Lint
+This repo held a Go CA-MITM proxy before commit `e2c2b38`. That code is gone;
+`git log` has it.
 
-```bash
-make build                                      # ./bin/osm (trimpath, -s -w)
-make test                                       # go test -race -count=1 ./...           (unit only)
-make test-integration                           # go test -race -count=1 -tags=integration ./tests/integration/...
-make test-all                                   # both suites with -tags=integration
-make vet
-make lint                                       # golangci-lint (config in .golangci.yml)
-make sec                                        # gosec
-go test -race -count=1 ./internal/core/detector/...   # single package
-go test -race -count=1 -run TestMaskFlat_StripeLive ./internal/core/transformer/...   # single test
-go test -bench=. -benchmem -run=^$ ./internal/core/detector/...
-go test -fuzz=^FuzzMaskUnmask$ -fuzztime=10s ./internal/core/transformer/...
-go test -fuzz=^FuzzBashGate$ -fuzztime=10s ./internal/harness/claudecode/...
-go test -fuzz=^FuzzScanner_StreamRobustness$ -fuzztime=10s ./internal/core/detector/...
+## The one invariant
+
+**A fake looks exactly like the real thing.** Same vendor prefix, same length,
+same character classes. Never `[REDACTED]`, never a hash tag, never a
+placeholder. An opaque token changes how the model reasons — it stops treating
+the value as an Anthropic key and starts treating it as a hole. A same-shaped
+fake preserves the plan.
+
+Everything else in this codebase is negotiable. That is not.
+
+## Module map
+
+| Path | Owns |
+| --- | --- |
+| `hooks/register.ts` | Wiring. One `Vault`, four `register*` calls. No logic. |
+| `hooks/options.ts` | `PluginOptions` → typed `Options` |
+| `hooks/env.ts` | `.env` parsing, comment- and quote-aware |
+| `hooks/events/session-start.ts` | `.env` registration + persistence restore |
+| `hooks/events/tool-call.ts` | The round trip, both directions |
+| `hooks/events/prompt.ts` | `prompt.submit` / `.context` / `.section` |
+| `hooks/events/agent-spawn.ts` | `agent.spawn`, the subagent boundary |
+| `hooks/vault/index.ts` | The two-way map |
+| `hooks/vault/garble.ts` | The format-preserving fake |
+| `hooks/vault/walk.ts` | Bounded deep traversal, binary-safe |
+| `hooks/vault/persist.ts` | `$.store` backing, opt-in |
+| `hooks/detect/index.ts` | The scanner |
+| `hooks/detect/prefix.ts` | Literal-prefix extraction |
+| `hooks/detect/entropy.ts` | Shannon layer |
+| `hooks/detect/suppress.ts` | False-positive suppression |
+| `hooks/detect/rules/*.ts` | 140 patterns in six groups |
+| `hooks/policy/boundary.ts` | `outbound`/`inbound`, where `ref` is stripped |
+| `hooks/policy/model-facing.ts` | Arguments that must keep their fakes |
+| `hooks/policy/budget.ts` | Failure fallbacks |
+
+Adding a rule source is one file in `rules/` plus one line in `rules/index.ts`.
+No registry, no init-time side effects.
+
+`types/claude-code.d.ts` (10.7k lines) is the engine's own declaration file
+from `/plugin-types`, vendored so CI typechecks without a Claude Code install.
+Not our code. `.gitattributes` marks it `linguist-generated`. Refresh it when
+the engine API moves.
+
+## Engine facts that shape the code
+
+These are not style choices. Each one caused a bug.
+
+**A skipped hook fails OPEN.** The engine skips a hook that throws *or
+overruns its budget* and runs core in its place. For a masker that is worse
+than being absent, so every hook answers for itself via `policy/budget.ts`.
+
+The deadline must cover our own work and never a `next()` call. An earlier
+version wrapped `next()`, which charged every hook beneath us to our budget —
+a slow unrelated plugin made osm drop the user's prompt and blame itself.
+
+**`ref` pins the unmasked messages.** `next(e)` returns a `ref` naming the
+messages core already built. Return it and core uses those verbatim — the
+unmasked ones. Any rewritten result must answer without `ref`.
+
+**`claudeMd` rides in `prompt.context`, not `prompt.section`.** Instruction
+files land in `prompt.context.blocks` under the name `claudeMd`.
+`prompt.section` carries `memory` and friends. Both are needed; hooking only
+one leaves a live channel.
+
+**Three model-facing fields on a tool result, not two.** `result`, `text`, and
+`context` — the last carries a PostToolUse hook's additional text straight to
+the model where the user never sees it.
+
+**`agentId` is camelCase.** The classic-hook spelling `agent_id` reads
+`undefined`.
+
+**Restoring is for external boundaries only.** A value another model reads is
+not one. `agent.spawn` is the general guarantee — every subagent dispatch goes
+through it whatever tool triggered it, so a tool-name list can never be the
+only answer. `model-facing.ts` additionally keeps the real value out of the
+Agent tool's recorded arguments.
+
+**"Opaque payload" is a property of the string, not of its key.** `walk.ts`
+once skipped subtrees by key name (`data`, `base64`, …) to avoid garbling
+images. That made `{ data: { apiKey: "sk-ant-…" } }` reach the model
+unmasked — a fix for one problem became a leak. Test the leaf: long,
+whitespace-free, base64 alphabet.
+
+## Vault lifetime
+
+Module memory, one load of the plugin.
+
+| Action | Vault | Result |
+| --- | --- | --- |
+| `/clear`, `/compact` | kept | Safe |
+| `/reload-plugins`, hook edit | new | Old fakes dead |
+| `--resume`, `--continue`, fork | new | Old fakes dead |
+
+"Dead" means the model writes an old fake into a tool call, the hook does not
+recognise it, and the tool gets the fake. The command fails against an invalid
+credential. No secret leaks — safe for privacy, wrong for usability.
+
+`persist: true` fixes it via `$.store`, with a deliberate split: an `env` entry
+stores only `{fake, file, key}` and never expires, because the secret is
+already in `.env` and gets re-read. A `literal` entry stores the value itself
+and expires after `retentionDays` (default 120). Only `literal` puts a
+previously-transient secret at rest, which is why only it has a window.
+
+The store is plaintext and the plugin cannot chmod it — `$.fs` has no chmod.
+
+## Build and test
+
+```sh
+bun run scripts/unit-check.ts                          # 40 pure-logic checks
+bun run scripts/hook-check.ts                          # 12 hook-level checks
+npx --yes --package typescript@5 tsc -p tsconfig.json  # NB: --package, see below
+bash scripts/local-e2e.sh                              # real model, 3 passes
+bash scripts/scenario-e2e.sh                           # 11 scenarios in tmux, 25 checks
+bash scripts/sandbox-e2e.sh                            # real model, throwaway box
 ```
 
-Go 1.26.2 (`.tool-versions`, `go.mod`). Module: `github.com/pratikbin/opensecretmask`.
+`npx typescript@5 tsc` fails with "could not determine executable to run" — the
+package's bin is `tsc`, not `typescript`. `--package` is required.
 
-### Test infrastructure
+`scripts/scenario-e2e.sh` also runs the fail cases, because a masker that
+breaks must break closed. `stale` gives the model a fake no vault has minted,
+the shape a transcript carries after a resume, and the tool must receive that
+dead fake rather than a guess. `broken` runs a sabotaged copy whose `mask()`
+throws, and the refusal must come from the plugin: a silent pass means the
+engine skipped the hook and served the real result. `validate` and `noload`
+need no model and catch the failure with no symptom, where the module is
+rejected, no hook loads, and every other scenario quietly reports the
+control's answer.
 
-- **Build tag separation**: `tests/integration/` is gated by `//go:build integration` so it only runs under `make test-integration` / `make test-all`.
-- **Race tests**: `internal/core/engine/engine_race_test.go` exercises `MaskText`/`PreloadEnv` under contention; intra-process determinism only — see "Known issues" for the gofrs/flock per-process limitation.
-- **Fuzz targets**: `FuzzMaskUnmask` (transformer), `FuzzBashGate` (claudecode), `FuzzScanner_StreamRobustness` (detector). All three skip NUL inputs to avoid the cedar panic (see Known issues).
-- **goleak tripwires**: `engine` and `claudecode` packages install `goleak.VerifyTestMain` defensively — no goroutines are spawned today, but future refactors will fail fast if they leak one.
-- **Known-bug regression markers**: `*/known_bugs_test.go` files use `t.Skip("known: see CLAUDE.md known issues")`; removing the skip line must make the test pass once the underlying bug is fixed.
-- **Benchmarks**: `make bench` is not wired — invoke directly per-package with `-benchmem`. Hot benches live in `cmd/osm/hook_pipeline_bench_test.go`, `internal/core/engine/engine_bench_test.go`, `internal/core/detector/scanner_bench_test.go`.
+### e2e traps
 
-## Architecture
+Four things make a runner look broken when it is not.
 
-`osm` is a credential-masking hook binary. Pipeline runs per-event over stdin/JSON, fail-closed on mask, fail-open on unmask.
+- `--allowedTools` is variadic, so a prompt after it parses as a tool name.
+  Pass the prompt on stdin.
+- A prompt asking the model to write a credential to a file is refused as an
+  exfiltration pattern. Observe the restore direction with `grep -c` instead.
+- The `Read` tool needs explicit approval for a `.env` file. Put the same value
+  in a normal file for the model to read.
+- `--plugin-dir` takes the directory holding `.claude-plugin`. From inside the
+  clone that is `.`.
 
-### Layered packages (no cycles)
+## Open items
 
-```
-cmd/osm  →  pkg/api  →  internal/core/engine  →  internal/core/{detector, transformer, store, keymgr}
-                    ↘                          ↗
-                       internal/harness/{protocol, claudecode}
-```
+- Secret-shaped JSON property *names* are not masked. Values only. Rewriting
+  keys needs two-way collision handling for a case that barely occurs.
+- A partial fake does not restore; prefix matching needs false-positive guards.
+- No PII group. SSN sits in `builtin`. Email/phone/card would have to default
+  off, since agent prompts carry user data on purpose.
+- A classic hook downstream of us receives the restored value, and the engine
+  writes its stdout verbatim into the transcript JSONL. Observed with a
+  `PreToolUse` rewriter. Nothing the plugin can do from inside.
 
-- **`internal/core/keymgr`** — owns 32-byte `install.key` (mode 0600). `Hasher.MAC` = HMAC-SHA256; `Hasher.Stream` = HKDF-Expand reader for charset rejection sampling.
-- **`internal/core/store`** — `~/.opensecretmask/` layout. `flock` (`gofrs/flock`) + tmp+fsync+rename atomic writes. Owns `config.toml`, `secrets.json`, `mappings.json`, `allowlist.json`, `audit.log`. `OPENSECRETMASK_HOME` env overrides root for tests.
-- **`internal/core/transformer`** — format-preserving mask. `Mask` dispatches `maskFlat` (PrefixLen+Charset) or `maskSegments` (capture-group masking, used by JWT/PEM/db-conn-string). Rejection sampling (`maxAccepted = (256/csLen)*csLen`) avoids modulo bias. Two-tier collision check (self + cross-secret in `existing` map). 8-retry bound, then `ErrMaskExhaustedRetries`. `Hasher` is a local interface; `keymgr.Hasher` satisfies it (no transformer→keymgr import). `BuildReverseIndex` + `Replace` use `iohub/ahocorasick` (a.k.a. cedar) for unmask.
-- **`internal/core/detector`** — 3-layer cascade: registered exact-match (AC) → 19 builtin rules → optional Shannon entropy. `resolveOverlaps` sorts by Confidence desc → length desc → start asc, greedy non-overlapping. `Scanner.Stream` implements spec §8.2: adaptive overlap = max(LongestRuleMaxLen, 4096); separate grow-only `containerBuf` for PEM/SSH; full-buffer EOF flush (closes tail-leak); fail-closed sentinels `ErrScanCapExceeded` / `ErrContainerOverflow` / `ErrUnclosedContainer` never flush container body bytes.
-- **`internal/core/engine`** — orchestrator. `MaskText` runs detector → reuse existing mask via reverse lookup → call `transformer.Mask` for new findings → persist under EX-lock (re-reads mappings inside lock for race safety). `UnmaskText` reads RLock + `ReverseIndex.Replace`. `PreloadEnv` walks `.env` files + registers values under one EX-lock.
-- **`internal/harness/protocol`** — canonical `Request`/`Response` envelope. `Direction` ∈ {Mask, Unmask, Observe}. `Adapter` interface: `ParseRequest`, `EmitResponse`, `EventDirection`.
-- **`internal/harness/claudecode`** — claude-code translator. `events.go` maps event→Direction. `tools.go` declares per-tool JSON paths (`postToolUseFields`, `preToolUseFields`) with `*` wildcard for arrays. `path.go` implements `extractByPath`/`replaceByPath`. `bashgate.go` parses `Bash.command` via `mvdan.cc/sh/v3/syntax`; classifies ALLOW/ASK/DENY against egress blocklist, local allowlist, pipe/redirect/subshell/cmd-subst/eval/source/dot signals + literal `/dev/tcp/*`. Substring scan uses normalized padding (quotes/parens/`$` mapped to space) so `bash -c 'curl ...'` still matches.
-- **`cmd/osm/hook.go`** — the dispatcher. Re-entrancy guard via `OSM_RUNNING=1` env. `bootstrapEngine` builds `*engine.Engine` from the configured root. `runMask` fail-closes per `cfg.Hooks.MaskOnError` (`deny` → `{"decision":"block","reason":...}`, `redact-all` → replace targets with placeholder). `runUnmask` fail-opens (write `{}` and return nil). Bash gate runs only when `ToolName=="Bash"` AND replacements > 0. `runObserve` warns on `UserPromptSubmit`, calls `PreloadEnv` on `SessionStart`. Every path returns `nil` after writing JSON — non-zero exit on a successfully-handled event would let secrets leak through.
+## Attribution
 
-### Direction-aware failure (spec §8.10, locked invariant)
-
-- Mask path: fail closed (`MaskOnError = "deny"`).
-- Unmask path: fail open (passthrough — tool fails loudly with the mask string instead of leaking real value).
-
-### Storage write protocol
-
-All multi-file mutations: open `OpenLock`, `WithExclusive(timeout)`, re-read JSON inside lock, mutate, `WriteAtomic` (tmp+fsync+rename). Reads: `WithShared`. Lock timeout = `cfg.Hooks.LockTimeoutMs` (default 5000).
-
-## Plan / spec
-
-Full design: `docs/superpowers/specs/2026-05-02-opensecretmask-design.md`. Plan: `docs/superpowers/plans/2026-05-03-opensecretmask-implementation.md`. The 28 commits (`5169475..0aefbfd`) implement plan Tasks 0-27 in order. A subsequent intensive-testing pass (`aee9325..adf1ce2`, 11 commits) added race tests, fuzz targets, build-tagged integration matrix, full-pipeline benchmarks, goleak tripwires, and known-bug regression markers — see `~/.claude/plans/clever-twirling-whistle.md` for the test-pass plan.
-
-## Known issues (non-blocking, plan-locked)
-
-- `byte(sp.start), byte(sp.end)` in `transformer.maskSegments` info-byte construction truncates >255 — long secrets (e.g. RS256 JWT sigs ~342 chars) can derive duplicate streams across segments. Fix needs spec change too. Regression marker: `internal/core/transformer/known_bugs_test.go::TestMaskSegments_InfoByteTruncationCollision_KnownBug`.
-- `WriteAtomic` lacks parent-dir fsync after rename → durability gap on crash. Regression marker: `internal/core/store/known_bugs_test.go::TestWriteAtomic_ParentDirSyncMissing_KnownBug`.
-- `pem-private-key` rule `EndMarker: "-----END "` matches loosely; SSH marker is exact. Container detection still works but tighten on next pass. Regression marker: `internal/core/detector/known_bugs_test.go::TestPEMEndMarker_LooseMatch_KnownBug`.
-- `iohub/ahocorasick` (cedar) panics on input containing NUL byte (`\x00`) — found by `FuzzMaskUnmask`. Crash corpus removed and the three fuzz targets skip NUL inputs to keep CI green; sanitize input or replace lib. Regression marker: `internal/core/transformer/known_bugs_test.go::TestBuildReverseIndex_NULBytePanic_KnownBug`.
-- `store.Config.Validate()` only checks enums and `> 0` lower bounds; numeric upper-bound checks (MaxScanBytes, LockTimeoutMs, MaxContainerBytes) absent per "no features beyond requested". Regression marker: `internal/core/store/known_bugs_test.go::TestConfigValidate_AcceptsUnboundedNumeric_KnownBug`.
-- `gofrs/flock` is per-process: intra-process goroutines all share one OS file descriptor and can each succeed `WithExclusive` simultaneously, producing lost writes when N goroutines write distinct secrets in the same process. **Production model is one `osm hook` invocation = one process, so this is not a runtime hazard** — but the marker exists in case the engine ever runs in a long-lived daemon. Regression marker: `internal/core/engine/engine_race_test.go::TestMaskText_IntraProcessFlock_KnownBug`. Fix: add `sync.Mutex` around `WithExclusive` in `store.Lock`.
-
-## Conventions
-
-- Conventional Commits: `<type>(<scope>): <subject>`, ≤50 chars subject.
-- One commit per task. No squashing.
-- TDD not used — implementation first, tests in same task.
-- File size ≤1100 lines.
-- No comments unless WHY is non-obvious.
-- Test redirection via `t.Setenv("OPENSECRETMASK_HOME", t.TempDir())`.
+Suppression shapes and the binary skip list adapted from
+`ray-amjad/awesome-claude-code-function-hooks` (MIT).
