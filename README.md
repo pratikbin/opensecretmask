@@ -65,8 +65,25 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir ~/.claude/osm
 
 `--plugin-dir` takes the directory that holds `.claude-plugin/plugin.json`.
 
-To check that it loaded, look for the `osm:` line at the start of the session.
-It reports how many secrets it registered.
+## What you see
+
+One line when the session starts, naming what is watched and what is off:
+
+```
+osm: masking (2 secrets from .env, .env.local, 146 rules, entropy on)
+osm: masking on, nothing registered (146 rules)
+```
+
+Then a line pinned under the prompt, which is how you know it is working while
+you work. A masking plugin is otherwise silent by design:
+
+```
+osm: 3 secrets · 12 masked · 4 restored
+```
+
+`masked` counts values swapped on the way to the model and `restored` counts
+fakes swapped back on the way into a tool, so the second number is the round
+trip actually closing. Before anything is found the line reads `osm: watching`.
 
 ## How it works
 

@@ -13,6 +13,7 @@
 
 const R = new URL('../hooks', import.meta.url).pathname
 const { register } = await import(`${R}/register.ts`)
+const { resetStatus } = await import(`${R}/status.ts`)
 
 let pass = 0, fail = 0
 const ok = (n: string, c: boolean) => { c ? pass++ : fail++; console.log(`${c ? 'PASS' : 'FAIL'}  ${n}`) }
@@ -24,10 +25,14 @@ type Handler = ($: any, e: any, next: (e: any) => any) => any
 /** A loaded plugin: the hooks it registered, plus the `$` they are handed. */
 function seat() {
   const hooks = new Map<string, Handler>()
+  const logs: string[] = []
+  const statuses: string[] = []
+  // A fresh module keeps no drawn line, and neither should a fresh seat.
+  resetStatus()
   const $ = {
     fs: { exists: async () => false, read: async () => '' },
     store: { get: async () => undefined, set: async () => undefined },
-    ui: { log: () => undefined },
+    ui: { log: (t: string) => logs.push(t), status: (t: string) => statuses.push(t) },
     clock: { sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)) },
   }
   register((name: string, fn: Handler) => hooks.set(name, fn), {})
@@ -36,7 +41,7 @@ function seat() {
     if (!h) throw new Error(`no handler for ${name}`)
     return h($, e, world)
   }
-  return { hooks, fire }
+  return { hooks, fire, logs, statuses }
 }
 
 ok('H all six hooks registered', (() => {
@@ -44,6 +49,25 @@ ok('H all six hooks registered', (() => {
   return ['session.start', 'tool.call', 'agent.spawn', 'prompt.submit', 'prompt.context', 'prompt.section']
     .every((n) => hooks.has(n))
 })())
+
+// The lines the user reads: one at session start, one pinned under the prompt.
+{
+  const { fire, logs, statuses } = seat()
+  await fire('session.start', { cwd: '/work', surface: 'terminal' }, (e: any) => e)
+  ok('S start line names the rule count', /\d+ rules/.test(logs[0] ?? ''))
+  ok('S start line says nothing is registered', (logs[0] ?? '').includes('nothing registered'))
+  ok('S status starts at watching', statuses[0] === 'osm: watching')
+
+  await fire('tool.call', { tool: 'Bash', command: 'cat .env' },
+    () => ({ result: { stdout: KEY }, text: KEY }))
+  const after = statuses[statuses.length - 1] ?? ''
+  ok('S status counts the secret', after.includes('1 secret'))
+  ok('S status counts the masking', /\b[1-9]\d* masked/.test(after))
+
+  const before = statuses.length
+  await fire('tool.call', { tool: 'Bash', command: 'echo nothing to see' }, (e: any) => ({ result: {}, text: 'fine' }))
+  ok('S status is not redrawn when nothing changed', statuses.length === before)
+}
 
 // A secret in a tool result reaches the model as a fake.
 {

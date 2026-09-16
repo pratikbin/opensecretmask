@@ -1,10 +1,11 @@
 import type { EngineInterface, On } from 'claude-code'
 
-import { scanValues } from '../detect'
+import { RULES, scanValues } from '../detect'
 import { looksLikeSecret, MIN_SECRET_LEN, parseEnv } from '../env'
 import type { Options } from '../options'
 import type { PersistPort } from '../vault/persist'
 import { load, save } from '../vault/persist'
+import { startLine, statusLine } from '../status'
 import type { Vault } from '../vault'
 
 /**
@@ -26,7 +27,9 @@ export function registerSessionStart(on: On, vault: Vault, options: Options) {
       await save(portOf($), vault.entries())
     }
 
-    $.ui.log(summary(registered, restored, options))
+    $.ui.log(startLine(registered, restored, RULES.length, options))
+    const line = statusLine(vault.stats)
+    if (line) $.ui.status(line)
     return next(e)
   })
 }
@@ -75,15 +78,6 @@ async function loadEnvSecrets(
     }
   }
   return count
-}
-
-function summary(registered: number, restored: number, options: Options): string {
-  const parts: string[] = []
-  if (registered > 0) parts.push(`${registered} from ${options.envFiles.join(', ')}`)
-  if (restored > 0) parts.push(`${restored} restored`)
-  return parts.length === 0
-    ? 'osm: masking on, no registered secrets (detection rules still apply)'
-    : `osm: masking ${parts.join(', ')}`
 }
 
 /** Built here, not imported: the hook validator follows `$` only within a file. */

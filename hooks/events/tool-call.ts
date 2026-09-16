@@ -1,6 +1,7 @@
 import type { EngineInterface, On, ToolCallInput, ToolCallResult } from 'claude-code'
 
 import { inbound, outbound } from '../policy/boundary'
+import { statusLine } from '../status'
 import { guard } from '../policy/budget'
 import type { Options } from '../options'
 import type { PersistPort } from '../vault/persist'
@@ -40,6 +41,9 @@ export function registerToolCall(on: On, vault: Vault, options: Options) {
       () => outbound(vault, up),
       () => ({ deny: DENY_MASK }) as ToolCallResult,
     )
+
+    const line = statusLine(vault.stats)
+    if (line) $.ui.status(line)
 
     if (options.persist && vault.size !== savedSize) {
       savedSize = vault.size

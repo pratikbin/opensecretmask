@@ -1,6 +1,7 @@
 import type { On } from 'claude-code'
 
 import { guard } from '../policy/budget'
+import { statusLine } from '../status'
 import type { Vault } from '../vault'
 
 const DROP =
@@ -29,7 +30,10 @@ export function registerPrompt(on: On, vault: Vault) {
       }),
       () => undefined,
     )
-    return masked === undefined ? { drop: DROP } : next({ ...e, ...masked })
+    if (masked === undefined) return { drop: DROP }
+    const line = statusLine(vault.stats)
+    if (line) $.ui.status(line)
+    return next({ ...e, ...masked })
   })
 
   on('prompt.context', async ($, e, next) => {

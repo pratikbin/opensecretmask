@@ -15,6 +15,20 @@ const GARBLE_TRIES = 8
 export type EnvSource = { file: string; key: string }
 
 /**
+ * What the session has done so far, for the status line.
+ *
+ * `masked` and `restored` count substitutions and not distinct secrets: one
+ * key read twice is two. That is the number that tells a user the plugin is
+ * doing work, which is what the line is for.
+ */
+export type Stats = {
+  secrets: number
+  fromEnv: number
+  masked: number
+  restored: number
+}
+
+/**
  * The two-way map between a secret and its fake.
  *
  * A secret maps to a fake through this map, not through reversible maths, so
@@ -34,10 +48,22 @@ export class Vault {
   #secretsByLength: string[] | undefined
   #masksByLength: string[] | undefined
 
+  #masked = 0
+  #restored = 0
+
   constructor(private readonly cfg: DetectConfig = DEFAULT_DETECT) {}
 
   get size(): number {
     return this.#bySecret.size
+  }
+
+  get stats(): Stats {
+    return {
+      secrets: this.#bySecret.size,
+      fromEnv: this.#envSource.size,
+      masked: this.#masked,
+      restored: this.#restored,
+    }
   }
 
   #remember(secret: string, fake: string): void {
@@ -121,8 +147,10 @@ export class Vault {
       // A fake already in flight must never be masked a second time.
       if (this.#byMask.has(secret)) continue
       const fake = this.maskOf(secret)
-      if (!out.includes(secret)) continue
-      out = out.split(secret).join(fake)
+      const parts = out.split(secret)
+      if (parts.length === 1) continue
+      this.#masked += parts.length - 1
+      out = parts.join(fake)
     }
     return out
   }
@@ -133,8 +161,10 @@ export class Vault {
     this.#masksByLength ??= [...this.#byMask.keys()].sort((a, b) => b.length - a.length)
     let out = text
     for (const fake of this.#masksByLength) {
-      if (!out.includes(fake)) continue
-      out = out.split(fake).join(this.#byMask.get(fake)!)
+      const parts = out.split(fake)
+      if (parts.length === 1) continue
+      this.#restored += parts.length - 1
+      out = parts.join(this.#byMask.get(fake)!)
     }
     return out
   }
