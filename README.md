@@ -160,6 +160,7 @@ bun run scripts/unit-check.ts   # 40 checks, no Claude Code needed
 bun run scripts/hook-check.ts   # 12 hook-level checks
 npx --yes --package typescript@5 tsc -p tsconfig.json
 bash scripts/local-e2e.sh       # real end-to-end run on your own account
+bash scripts/scenario-e2e.sh    # every channel, in parallel tmux windows, with metrics
 ```
 
 `scripts/local-e2e.sh` runs three headless passes against a real model and
