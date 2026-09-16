@@ -117,12 +117,22 @@ bun run scripts/unit-check.ts                          # 40 pure-logic checks
 bun run scripts/hook-check.ts                          # 12 hook-level checks
 npx --yes --package typescript@5 tsc -p tsconfig.json  # NB: --package, see below
 bash scripts/local-e2e.sh                              # real model, 3 passes
-bash scripts/scenario-e2e.sh                           # real model, 7 passes in tmux
+bash scripts/scenario-e2e.sh                           # 11 scenarios in tmux, 25 checks
 bash scripts/sandbox-e2e.sh                            # real model, throwaway box
 ```
 
 `npx typescript@5 tsc` fails with "could not determine executable to run" — the
 package's bin is `tsc`, not `typescript`. `--package` is required.
+
+`scripts/scenario-e2e.sh` also runs the fail cases, because a masker that
+breaks must break closed. `stale` gives the model a fake no vault has minted,
+the shape a transcript carries after a resume, and the tool must receive that
+dead fake rather than a guess. `broken` runs a sabotaged copy whose `mask()`
+throws, and the refusal must come from the plugin: a silent pass means the
+engine skipped the hook and served the real result. `validate` and `noload`
+need no model and catch the failure with no symptom, where the module is
+rejected, no hook loads, and every other scenario quietly reports the
+control's answer.
 
 ### e2e traps
 
