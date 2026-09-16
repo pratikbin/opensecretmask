@@ -1,0 +1,24 @@
+{
+  "name": "opensecretmask",
+  "owner": {
+    "name": "pratikbin"
+  },
+  "metadata": {
+    "description": "Secret masking for Claude Code. A credential becomes a format-preserving fake before the model reads it.",
+    "version": "0.1.0",
+    "repository": "https://github.com/pratikbin/opensecretmask",
+    "homepage": "https://github.com/pratikbin/opensecretmask"
+  },
+  "plugins": [
+    {
+      "name": "osm",
+      "source": "./",
+      "version": "0.1.0",
+      "description": "Replaces a secret with a format-preserving fake before the model reads it, and restores the real credential on the way into a tool call. In memory only, nothing on disk.",
+      "author": {
+        "name": "pratikbin"
+      },
+      "keywords": ["security", "secrets", "redaction", "privacy", "function-hooks"]
+    }
+  ]
+}

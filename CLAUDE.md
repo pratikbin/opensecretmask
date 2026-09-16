@@ -39,6 +39,8 @@ Everything else in this codebase is negotiable. That is not.
 | `hooks/policy/boundary.ts` | `outbound`/`inbound`, where `ref` is stripped |
 | `hooks/policy/model-facing.ts` | Arguments that must keep their fakes |
 | `hooks/policy/budget.ts` | Failure fallbacks |
+| `.claude-plugin/marketplace.json` | The install source for `claude plugin install osm@opensecretmask` |
+| `CONTRIBUTING.md` | How to add a rule. Update its counts when `RULES` grows |
 
 Adding a rule source is one file in `rules/` plus one line in `rules/index.ts`.
 No registry, no init-time side effects.
