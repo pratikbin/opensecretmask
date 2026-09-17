@@ -125,11 +125,15 @@ echo
 if printf '%s\n' "${PICK[@]}" | grep -qx broken; then
   cp -R "$PLUGIN" "$HERE/broken-plugin"
   rm -rf "$HERE/broken-plugin/.git"
-  perl -0pi -e "s/  mask\(text: string\): string \{/  mask(text: string): string {\n    throw new Error('osm scenario-e2e: forced mask failure')/" \
+  # Matched loosely on purpose: `mask()` gained a second parameter once, and a
+  # signature-exact pattern skipped this scenario silently instead of failing.
+  perl -0pi -e "s/(\n  mask\([^)]*\): string \{)/\$1\n    throw new Error('osm scenario-e2e: forced mask failure')/" \
     "$HERE/broken-plugin/hooks/vault/index.ts"
   grep -q 'forced mask failure' "$HERE/broken-plugin/hooks/vault/index.ts" \
-    || { echo "could not sabotage the copy; skipping the broken scenario" >&2; PICK=($(printf '%s\n' "${PICK[@]}" | grep -vx broken)); }
+    || { echo "could not sabotage the copy: mask() no longer matches the pattern" >&2; exit 1; }
 fi
+
+printf '{"enabledPlugins":{"osm@opensecretmask":false}}\n' > "$OUT/no-osm.json"
 
 RUNNING=()
 tmux new-session -d -s "$SESSION" -c "$FIX" 'sleep 3600'
@@ -137,10 +141,18 @@ for id in "${PICK[@]}"; do
   printf '%s\n' "${LOCAL_ONLY[@]}" | grep -qx "$id" && continue
   scenario "$id" || continue
   printf '%s' "$PROMPT" > "$OUT/$id.prompt"
-  cmd="cd '$FIX' && CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 timeout 300 claude -p --output-format json"
+  # The control pass must run with function hooks OFF, not merely without
+  # `--plugin-dir`: on a machine where osm is installed for real, an inherited
+  # copy masks the control too and the matrix quietly proves nothing.
+  cmd="cd '$FIX' && CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=$WITH_PLUGIN timeout 300 claude -p --output-format json"
   cmd="$cmd --append-system-prompt '$SYS'"
   [ ${#TOOLS[@]} -gt 0 ] && cmd="$cmd --allowedTools $(printf "'%s' " "${TOOLS[@]}")"
-  [ "$WITH_PLUGIN" = 1 ] && cmd="$cmd --plugin-dir '$PLUGIN_USE'"
+  # The control must turn off an osm INSTALLED on this machine, not merely go
+  # without `--plugin-dir`: an inherited copy masks the control too and the
+  # matrix then proves nothing. `--bare` would do it but demands an API key, so
+  # the one plugin is disabled through settings instead.
+  [ "$WITH_PLUGIN" = 1 ] && cmd="$cmd --plugin-dir '$PLUGIN_USE'" \
+                         || cmd="$cmd --settings '$OUT/no-osm.json'"
   cmd="$cmd < '$OUT/$id.prompt' > '$OUT/$id.json' 2> '$OUT/$id.err'"
   # A window that exits vanishes, so the marker file is what "finished" means.
   cmd="$cmd; echo \$? > '$OUT/$id.done'"

@@ -85,6 +85,26 @@ osm: 3 secrets · 12 masked · 4 restored
 fakes swapped back on the way into a tool, so the second number is the round
 trip actually closing. Before anything is found the line reads `osm: watching`.
 
+And `/osm-secrets`, which prints the pairs: every secret the session has
+masked, beside the fake it wears.
+
+```
+osm: 3 secrets this session (real → fake)
+1. sk-ant-api•••i05rP (53) → sk-ant-loz•••kG8uT (53)
+2. ghp_1a2B3c•••VwXyZ (40) → ghn_6b0H6u•••NqZeA (40)
+3. -----BEGIN•••Y----- (72) → -----BEGIN•••K----- (72)
+```
+
+One bounded line per secret, not a column table: a PEM key carries newlines and
+a JWT runs to 300 characters, so aligned columns come apart the moment a real
+session has thirty secrets in it. Both values keep their ends, lose the middle
+and state their true length, which is enough to match a row against your `.env`
+without printing the credential whole. The list goes out through the engine's
+user-only log channel, so **the model never receives it** — printing it as the command's own output would hand the model
+every fake beside its original, which is the leak the plugin exists to prevent.
+It is still on your screen and in the debug log, so treat a shared terminal
+recording accordingly.
+
 ## How it works
 
 Claude Code exposes function hooks at each boundary where text moves between
@@ -109,6 +129,26 @@ for a `Bash` command or a `Write`, never for a subagent's task text. Two layers
 hold that line: `agent.spawn` masks the task of every subagent dispatch
 whatever tool triggered it, and `policy/model-facing.ts` stops the real value
 appearing in the Agent tool's recorded arguments on the way there.
+
+### Diagrams
+
+Each PNG links to an interactive, self-contained HTML version — open it in a
+browser, no server needed.
+
+[![Module architecture](docs/diagrams/architecture.png)](docs/diagrams/architecture.html)
+
+`register.ts`'s wiring fan-out, the mask/restore core, and the vault's
+persistence path.
+
+[![Tool-call round trip](docs/diagrams/tool-call-sequence.png)](docs/diagrams/tool-call-sequence.html)
+
+`inbound()` restoring a fake before the real tool runs, `outbound()` masking
+the result after, both fail-closed.
+
+[![Vault lifetime](docs/diagrams/vault-lifecycle.png)](docs/diagrams/vault-lifecycle.html)
+
+What survives `/clear`, what a reload kills, and the `persist: true` recovery
+path.
 
 ## What it detects
 
@@ -135,6 +175,13 @@ vendor count suggests:
 - an assignment such as `DD_API_KEY=…` or `aws_secret_access_key = "…"`
 - a PEM or PGP private key block, the whole block and not the header
 - a JSON Web Token (a signed `eyJ…` token)
+
+A context rule masks only its capture group, and that group is checked before
+it is trusted: surrounding quotes and commas are trimmed off, and a value that
+merely names a credential is dropped. `${DB_PASSWORD}`, `$ANTHROPIC_API_KEY`,
+`<your-key-here>`, `[MASKED-0001]`, `changeme`, a bare UUID and a regex source
+all stay readable. Plain hex and digits are not dropped: under an explicit
+credential name they are usually the real key.
 
 So a vendor with no rule of its own is often still caught. A secret with no
 recognizable shape at all is the `.env` layer's job.
@@ -352,8 +399,8 @@ some other plugin is slow. A visible refusal beats an invisible leak.
 ## Tests
 
 ```sh
-bun run scripts/unit-check.ts   # 52 checks on the pure logic
-bun run scripts/hook-check.ts   # 12 checks on the hooks, through a fake engine
+bun run scripts/unit-check.ts   # 87 checks on the pure logic
+bun run scripts/hook-check.ts   # 21 checks on the hooks, through a fake engine
 npx --yes --package typescript@5 tsc -p tsconfig.json
 claude plugin validate .claude-plugin/plugin.json   # the engine must accept the hooks
 ```
@@ -392,7 +439,7 @@ hooks/
   options.ts           plugin settings
   env.ts               .env parsing, comment-aware
   events/              one file per engine event
-    session-start.ts  tool-call.ts  prompt.ts  agent-spawn.ts
+    session-start.ts  tool-call.ts  prompt.ts  agent-spawn.ts  command.ts
   vault/
     index.ts           the two-way map
     garble.ts          the format-preserving fake

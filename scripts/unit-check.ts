@@ -14,6 +14,7 @@ const { inbound, outbound } = await import(`${R}/policy/boundary.ts`)
 const { isOpaque } = await import(`${R}/vault/walk.ts`)
 const { load, save, prune } = await import(`${R}/vault/persist.ts`)
 const { guard, guardAsync } = await import(`${R}/policy/budget.ts`)
+const { elide, secretsTable } = await import(`${R}/events/command.ts`)
 
 let pass = 0, fail = 0
 const ok = (n: string, c: boolean) => { c ? pass++ : fail++; console.log(`${c ? 'PASS' : 'FAIL'}  ${n}`) }
@@ -175,6 +176,34 @@ console.log(`rules: ${RULES.length}\n`)
   keep('an ordinary query string', 'https://example.com/docs?page=2&sort=name')
 }
 
+// FP the classes the session store showed masked and should not have been
+{
+  const PW = String.fromCharCode(80, 65, 83, 83, 87, 79, 82, 68)
+  keep('a connection-string placeholder', `postgres://user:${PW}@db:5432/app`)
+  keep('an env var reference', 'DATABASE_PASSWORD=${DB_PASSWORD}')
+  keep('a shell var reference', 'API_KEY="$ANTHROPIC_API_KEY"')
+  keep('a windows var reference', 'API_TOKEN=%API_TOKEN%')
+  keep('an angle-bracket placeholder', 'API_KEY=<your-api-key-here>')
+  keep('a bracketed placeholder', 'API_TOKEN=[MASKED-0001]')
+  keep('a documentation word', 'SECRET_KEY=changeme')
+  keep('a uuid under a credential name', 'SESSION_TOKEN=550e8400-e29b-41d4-a716-446655440000')
+  keep('a rule regex read out of this repo', String.raw`/\b[a-z][a-z0-9+.-]{1,20}:\/\/[^\s/@:]{1,80}:([^\s/@]{3,200})@/gi`)
+  keep('a truncated key from documentation', 'sk-ant-api03-Zx8Q2mLp')
+  keep('a truncated openai key', 'sk-proj-Zx8Q2mLp')
+  keep('an ssn inside a longer run', 'build 1234-56-78901')
+
+  // And the real things the same rules exist for still go.
+  hit('FP a full anthropic key', KEY)
+  hit('FP a hex value under a credential name', `SERVICE_API_KEY=${'a1b2c3d4'.repeat(4)}`)
+  hit('FP a password in a connection string', 'postgres://user:hunter2horsebattery@db:5432/app')
+  hit('FP a bare ssn', 'ssn 123-45-6789')
+
+  // The capture must stop at the value, not run into the quote that follows.
+  const v = new Vault()
+  const masked = v.mask(`SERVICE_API_KEY="${'a1b2c3d4'.repeat(4)}",`)
+  ok('FP capture keeps the surrounding syntax', masked.endsWith('",') && !masked.includes('a1b2c3d4'))
+}
+
 // round trip still works
 {
   const v = new Vault()
@@ -184,6 +213,47 @@ console.log(`rules: ${RULES.length}\n`)
   ok('RT prefix kept', m.includes('sk-ant-'))
   ok('RT round trip', v.unmask(m) === body)
   ok('RT idempotent', v.mask(m) === m)
+}
+
+// LG the ledger behind /osm-secrets
+{
+  ok('LG elide hides the middle only', elide('0123456789') === '0123•••789')
+  ok('LG elide leaves both ends', elide(KEY).startsWith('sk-ant-') && elide(KEY).endsWith('AAA'))
+  ok('LG elide keeps the length', elide(KEY).length === KEY.length)
+
+  const v = new Vault()
+  v.register(KEY, { file: '/work/.env', key: 'ANTHROPIC_API_KEY' })
+  const fake = v.maskOf(KEY)
+  v.mask(`use ${KEY} twice: ${KEY}`, 'Bash')
+  v.unmask(`curl ${fake}`)
+
+  const [entry] = v.ledger()
+  ok('LG ledger records the env source', entry.file === '/work/.env' && entry.key === 'ANTHROPIC_API_KEY')
+  ok('LG ledger counts substitutions', entry.masked === 2 && entry.restored === 1)
+  ok('LG ledger pairs the fake with the secret', entry.fake === fake && entry.secret === KEY)
+
+  const found = new Vault().mask(`token ${KEY}`, 'Read')
+  const noted = new Vault()
+  noted.mask(`token ${KEY}`, 'Read')
+  const [seen] = noted.ledger()
+  ok('LG ledger names the rule that fired', seen.rule !== 'detected' && seen.rule.length > 0)
+  ok('LG ledger names the channel', seen.where === 'Read' && found !== '')
+
+  // What the store carries back: the row must still name the rule, the
+  // channel and the first sighting, not the moment of the reload.
+  const next = new Vault()
+  for (const e of v.entries()) next.adopt(e.fake, e.kind === 'env' ? KEY : e.secret,
+    e.kind === 'env' ? { file: e.file, key: e.key } : undefined, e)
+  const carried = next.ledger()[0]
+  ok('LG provenance survives the store', carried.rule === entry.rule && carried.where === entry.where)
+  ok('LG first sighting survives the store', carried.at === entry.at)
+  ok('LG table is the pairs and nothing else', secretsTable(v.ledger())[1]!.split('→').length === 2)
+
+  const table = secretsTable(v.ledger())
+  ok('LG table never prints the whole secret', !table.join('\n').includes(KEY))
+  ok('LG table pairs each secret with its fake', table.join('\n').includes(fake.slice(0, 10)))
+  ok('LG table keeps every row on one line', table.every((l: string) => !l.includes('\n') && l.length < 140))
+  ok('LG table says so when empty', secretsTable([])[0].includes('no secrets'))
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

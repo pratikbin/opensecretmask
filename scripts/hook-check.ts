@@ -34,8 +34,10 @@ function seat() {
     store: { get: async () => undefined, set: async () => undefined },
     ui: { log: (t: string) => logs.push(t), status: (t: string) => statuses.push(t) },
     clock: { sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)) },
+    command: { register: async () => ({ command: 'osm-secrets' }) },
   }
-  register((name: string, fn: Handler) => hooks.set(name, fn), {})
+  // `on` takes an optional matcher between the name and the handler.
+  register((name: string, a: any, b?: Handler) => hooks.set(name, b ?? a), {})
   const fire = (name: string, e: any, world: (e: any) => any) => {
     const h = hooks.get(name)
     if (!h) throw new Error(`no handler for ${name}`)
@@ -141,6 +143,21 @@ ok('H all six hooks registered', (() => {
   const out: any = await fire('tool.call', { tool: 'Bash', command: 'cat .env' },
     () => { throw new Error('the world broke') }).catch((err: unknown) => err)
   ok('H a throw beneath us is not swallowed into an unmasked pass', out instanceof Error)
+}
+
+// /osm-secrets draws its table on the user-only channel and tells the model
+// nothing: a `{ text }` answer would put every pair into the transcript.
+{
+  const { fire, logs } = seat()
+  await fire('tool.call', { tool: 'Bash', command: 'cat .env' },
+    () => ({ result: { stdout: KEY }, text: KEY }))
+  const before = logs.length
+  const out: any = await fire('command.run',
+    { command: 'osm-secrets', args: '', origin: { kind: 'composer' } }, (e: any) => e)
+  const drawn = logs.slice(before).join('\n')
+  ok('C command answers with no model-facing text', out.text === undefined)
+  ok('C command logs the pairs', drawn.includes('real → fake') && drawn.includes('→'))
+  ok('C command never logs the whole secret', !drawn.includes(KEY))
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

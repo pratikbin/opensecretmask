@@ -20,21 +20,22 @@ Everything else in this codebase is negotiable. That is not.
 
 | Path | Owns |
 | --- | --- |
-| `hooks/register.ts` | Wiring. One `Vault`, four `register*` calls. No logic. |
+| `hooks/register.ts` | Wiring. One `Vault`, five `register*` calls. No logic. |
 | `hooks/options.ts` | `PluginOptions` → typed `Options` |
 | `hooks/env.ts` | `.env` parsing, comment- and quote-aware |
 | `hooks/events/session-start.ts` | `.env` registration + persistence restore |
 | `hooks/events/tool-call.ts` | The round trip, both directions |
 | `hooks/events/prompt.ts` | `prompt.submit` / `.context` / `.section` |
 | `hooks/events/agent-spawn.ts` | `agent.spawn`, the subagent boundary |
-| `hooks/vault/index.ts` | The two-way map |
+| `hooks/events/command.ts` | `/osm-secrets`: one bounded `real → fake` line per secret |
+| `hooks/vault/index.ts` | The two-way map, and the ledger behind `/osm-secrets` |
 | `hooks/vault/garble.ts` | The format-preserving fake |
 | `hooks/vault/walk.ts` | Bounded deep traversal, binary-safe |
-| `hooks/vault/persist.ts` | `$.store` backing, opt-in |
+| `hooks/vault/persist.ts` | `$.store` backing, on by default via the manifest |
 | `hooks/detect/index.ts` | The scanner |
 | `hooks/detect/prefix.ts` | Literal-prefix extraction |
 | `hooks/detect/entropy.ts` | Shannon layer |
-| `hooks/detect/suppress.ts` | False-positive suppression |
+| `hooks/detect/suppress.ts` | False-positive suppression, entropy and capture groups |
 | `hooks/detect/rules/*.ts` | 146 patterns in six groups |
 | `hooks/policy/boundary.ts` | `outbound`/`inbound`, where `ref` is stripped |
 | `hooks/policy/model-facing.ts` | Arguments that must keep their fakes |
@@ -84,6 +85,42 @@ its default. Every option here was dead until 2026-09-16 for exactly that
 reason. Adding an option means adding it in two places: `hooks/options.ts` and
 `userConfig`.
 
+**A `userConfig` default beats the module's own fallback.** The engine fills a
+declared option from the manifest before `register()` sees it, so the `??` in
+`options.ts` only ever fires for an option the manifest does not declare. The
+two disagree today: `persist` reads `false` in `options.ts` and `true` in the
+manifest, and the manifest wins — a machine with no `pluginConfigs.osm` entry
+still has a populated store. Change a default in one place and the code lies
+about itself.
+
+**A capture group is not evidence; a prefix is.** `sk-ant-…` is a key by
+construction, but a context-bearing rule takes whatever sits right of
+`PASSWORD=`, and the session store showed what that collects: `${DB_PASSWORD}`,
+`[MASKED-0001]`, the literal word PASSWORD out of a documented DSN, a UUID, and
+this repository's own rule source read back as a value. Only `group > 0`
+matches run through `trimCapture` and `isPlaceholder`, and both the raw and the
+trimmed form are tested, because trimming removes the very brackets that make a
+reference recognisable. Plain hex and digit runs are deliberately NOT
+suppressed there: under an explicit credential name they are usually real.
+
+**A restored entry must carry its provenance or every row reads alike.**
+`adopt()` once stamped each restored pair `literal / store / now`, so after a
+`/reload-plugins` all thirty-four rows of `/osm-secrets` said the same thing at
+the same second. `Entry` now carries `rule`, `where` and `firstAt`, and a row
+whose store predates them says "earlier session" rather than inventing one.
+
+**The log channel wraps, so a column table is not a table.** `$.ui.log` draws
+one line that the terminal folds at its own width, and a ledger row holds a PEM
+key with newlines in it. `/osm-secrets` bounds every field and prints one line
+per secret instead; an aligned table survived the tests and fell apart on a
+real session's 34 entries.
+
+**A command's `{ text }` is model-facing.** `command.run` output lands in the
+transcript the model reads, so `/osm-secrets` answers `{}` and draws its rows
+with `$.ui.log`, which the engine shows dim and never sends to the model. The
+command is declared from `session-start.ts` rather than its own hook, because
+`$.command.register` must be called in the file that declares the hook.
+
 **`agentId` is camelCase.** The classic-hook spelling `agent_id` reads
 `undefined`.
 
@@ -98,6 +135,29 @@ once skipped subtrees by key name (`data`, `base64`, …) to avoid garbling
 images. That made `{ data: { apiKey: "sk-ant-…" } }` reach the model
 unmasked — a fix for one problem became a leak. Test the leaf: long,
 whitespace-free, base64 alphabet.
+
+**The plugin masks its own development, and a model cannot tell.** osm is
+installed on this machine, so a session editing this repo reads every tool
+result through osm's own `outbound`. A value registered once — from a fixture
+`.env`, from a scenario run, from anything — is replaced in *all* later tool
+output, including the source of the plugin itself. A model that reads a
+masked file believes the fake is the text, and writes the fake into new code.
+
+That already happened. The word `PASSWORD` was registered as a literal secret,
+persisted, and thereafter every occurrence came back as an eight-letter garble
+of the same shape. Some session copied it into `env.ts`'s `SECRETISH` and into
+`builtin.ts`'s `Environment Variable Secret` rule, then into README and into
+every e2e fixture's variable name — self-consistently, which is why no test
+caught it. Both regexes still carry it. See Open items.
+
+Two consequences when working here:
+
+- A literal you cannot explain is suspect. Check it against `/osm-secrets` or
+  the store before treating it as intentional.
+- You cannot type the fake back. An Edit argument goes through `inbound`, which
+  restores a fake to its secret, so the file receives the real word and the
+  sentence you meant to write changes under you. Name the file and line
+  instead of quoting the garble.
 
 ## Vault lifetime
 
@@ -114,7 +174,7 @@ recognise it, and the tool gets the fake. The command fails against an invalid
 credential. No secret leaks — safe for privacy, wrong for usability.
 
 `persist: true` fixes it via `$.store`, with a deliberate split: an `env` entry
-stores only `{fake, file, key}` and never expires, because the secret is
+stores only `{fake, file, key}` plus how it was first found, and never expires, because the secret is
 already in `.env` and gets re-read. A `literal` entry stores the value itself
 and expires after `retentionDays` (default 120). Only `literal` puts a
 previously-transient secret at rest, which is why only it has a window.
@@ -127,8 +187,8 @@ instead, because the engine rewrites the file.
 ## Build and test
 
 ```sh
-bun run scripts/unit-check.ts                          # 55 pure-logic checks
-bun run scripts/hook-check.ts                          # 18 hook-level checks
+bun run scripts/unit-check.ts                          # 87 pure-logic checks
+bun run scripts/hook-check.ts                          # 21 hook-level checks
 npx --yes --package typescript@5 tsc -p tsconfig.json  # NB: --package, see below
 bash scripts/local-e2e.sh                              # real model, 3 passes
 bash scripts/scenario-e2e.sh                           # 11 scenarios in tmux, 25 checks
@@ -150,7 +210,7 @@ control's answer.
 
 ### e2e traps
 
-Four things make a runner look broken when it is not.
+Five things make a runner look broken when it is not.
 
 - `--allowedTools` is variadic, so a prompt after it parses as a tool name.
   Pass the prompt on stdin.
@@ -160,6 +220,10 @@ Four things make a runner look broken when it is not.
   in a normal file for the model to read.
 - `--plugin-dir` takes the directory holding `.claude-plugin`. From inside the
   clone that is `.`.
+- A run writes its fixture credentials into the real host store, because
+  `persist` is on by default and `$.store` is per-plugin, not per-fixture. The
+  store on a machine that has run the matrix is mostly dead scenario keys, and
+  anything registered there keeps being masked in later sessions.
 
 ## Open items
 
@@ -171,6 +235,14 @@ Four things make a runner look broken when it is not.
 - A classic hook downstream of us receives the restored value, and the engine
   writes its stdout verbatim into the transcript JSONL. Observed with a
   `PreToolUse` rewriter. Nothing the plugin can do from inside.
+- `env.ts:46` and `builtin.ts:102` carry a garble where `PASSWORD` belongs, so
+  neither the name test nor the `Environment Variable Secret` rule fires on
+  `DB_PASSWORD=` and its siblings. A value with no vendor shape behind such a
+  name is not masked at all. The same garble is in README and in every e2e
+  fixture's variable name, which is why the suite is green. Fixing it means
+  editing the two regexes, the docs, and the fixtures together, and dropping
+  the stale entry from the store first — otherwise the word is masked again on
+  the way in and the edit does not say what it reads.
 
 ## Attribution
 
