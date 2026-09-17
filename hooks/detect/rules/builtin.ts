@@ -9,8 +9,10 @@ import { rule, type Rule } from '../rule'
  * base64 body passes through.
  */
 export const builtinRules: Rule[] = [
-  rule('Anthropic API Key', 'critical', /sk-ant-[a-zA-Z0-9\-_]{10,}/g),
-  rule('OpenAI API Key', 'critical', /sk-proj-[a-zA-Z0-9\-_]{10,}/g),
+  // 24, not 10: a real key runs past 90 characters, and the short form only
+  // ever turns up as a truncated sample in documentation.
+  rule('Anthropic API Key', 'critical', /sk-ant-[a-zA-Z0-9\-_]{24,}/g),
+  rule('OpenAI API Key', 'critical', /sk-proj-[a-zA-Z0-9\-_]{24,}/g),
   rule('OpenAI Service Key', 'critical', /sk-svcacct-[a-zA-Z0-9\-]{10,}/g),
   rule('Fireworks API Key', 'critical', /fw_[a-zA-Z0-9]{24,}/g),
   rule('Google API Key', 'high', /AIza[0-9A-Za-z\-_]{35}/g),
@@ -72,7 +74,9 @@ export const builtinRules: Rule[] = [
   rule('JWT Token', 'high', /(ey[a-zA-Z0-9_\-=]{10,}\.){2}[a-zA-Z0-9_\-=]{10,}/g),
   rule('Extended Private Key', 'critical', /[xyzt]prv[1-9A-HJ-NP-Za-km-z]{107,108}/g),
   rule('Ethereum Private Key', 'critical', /0x[0-9a-f]{64}/g),
-  rule('Social Security Number', 'low', /\d{3}-\d{2}-\d{4}/g),
+  // Guarded on both sides: unanchored it fired inside a version string and
+  // any longer run of digits and dashes.
+  rule('Social Security Number', 'low', /(?<![\d-])\d{3}-\d{2}-\d{4}(?![\d-])/g),
   rule(
     'Google OAuth Client ID',
     'medium',

@@ -1,4 +1,5 @@
 import { entropyTokens } from './entropy'
+import { isPlaceholder, trimCapture } from './suppress'
 import { literalPrefix } from './prefix'
 import type { Rule } from './rule'
 import { RULES } from './rules'
@@ -82,8 +83,20 @@ function run(text: string, cfg: DetectConfig, into: (value: string, rule?: Rule)
     if (gate !== '' && !present.has(gate)) continue
     rule.re.lastIndex = 0
     for (const m of text.matchAll(rule.re)) {
-      const value = m[rule.group]
-      if (value) into(value, rule)
+      const raw = m[rule.group]
+      if (!raw) continue
+      // A whole-match rule is its own evidence. A capture group holds whatever
+      // followed `PASSWORD=`, so it is trimmed of the syntax it ran into and
+      // dropped when it names a secret instead of being one.
+      if (rule.group === 0) {
+        into(raw, rule)
+        continue
+      }
+      // Both forms are tested: trimming strips the very brackets that make
+      // `${DB_PASSWORD}` and `[MASKED-0001]` recognisable as placeholders.
+      const value = trimCapture(raw)
+      if (value.length < 3 || isPlaceholder(raw) || isPlaceholder(value)) continue
+      into(value, rule)
     }
   }
 

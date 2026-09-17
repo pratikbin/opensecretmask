@@ -46,6 +46,50 @@ function alphabetWidth(token: string): number {
   return new Set(token).size
 }
 
+/** A value that names a secret instead of being one: `$KEY`, `${KEY}`, `%KEY%`. */
+const REFERENCE = /^(?:\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%|<[^>]*>|\{\{[^}]*\}\}|\[[^\]]*\])$/
+
+/**
+ * A word standing in for a credential in documentation.
+ *
+ * Two patterns, not one with `i`: a case-insensitive `[A-Z]` class matches any
+ * letter, which suppressed every lowercase bearer token in the suite.
+ */
+const SHOUTED = /^(?:[A-Z][A-Z_-]{2,}|x{3,}|\*{3,}|\.{3,})$/
+const NAMED_PLACEHOLDER =
+  /^(?:changeme|your[_-]?\w*|example\w*|redacted|dummy|placeholder|sample)$/i
+
+/** Regex syntax, which arrives whenever a rule file or a pattern is read aloud. */
+const REGEX_SYNTAX = /\\[bdswBDSW]|\[\^|\(\?:|\{\d+,\d*\}|\\\//
+
+/**
+ * Whether a capture-group rule's value is not a credential at all.
+ *
+ * A prefix rule needs none of this: `sk-ant-…` is a key by construction. A
+ * context-bearing rule takes whatever sits to the right of `PASSWORD=`, and
+ * that is as often a variable reference, a documentation placeholder or — when
+ * the file being read is this repository — the rule's own regex source.
+ *
+ * Deliberately not here: plain hex and digit runs. Under an explicit
+ * `API_KEY=` the name is the evidence, and a 32-hex value there is usually the
+ * real thing.
+ */
+export function isPlaceholder(value: string): boolean {
+  if (REFERENCE.test(value)) return true
+  if (SHOUTED.test(value) || NAMED_PLACEHOLDER.test(value)) return true
+  if (REGEX_SYNTAX.test(value)) return true
+  if (UUID.test(value)) return true
+  return false
+}
+
+/** A captured value's edges, where the surrounding syntax ends up. */
+const EDGES = /^['"`([{,;:\s]+|['"`)\]}.,;:\s]+$/g
+
+/** `value` without the quotes, brackets and commas the capture ran into. */
+export function trimCapture(value: string): string {
+  return value.replace(EDGES, '')
+}
+
 /**
  * Whether an entropy candidate should be left alone.
  *
