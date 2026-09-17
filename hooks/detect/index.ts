@@ -4,9 +4,7 @@ import { literalPrefix } from './prefix'
 import type { Rule } from './rule'
 import { RULES } from './rules'
 
-export { literalPrefix } from './prefix'
 export { RULES } from './rules'
-export type { Rule } from './rule'
 
 export type DetectConfig = {
   entropy: boolean

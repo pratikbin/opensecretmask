@@ -73,7 +73,8 @@ async function loadEnvSecrets(
   let count = 0
   for (const file of files) {
     const path = `${cwd}/${file}`
-    if (!(await $.fs.exists(path).catch(() => false))) continue
+    // No existence check: a failed read is the same answer one call sooner,
+    // and `parseEnv('')` registers nothing.
     const text = await $.fs.read(path).catch(() => '')
     for (const [key, value] of parseEnv(text)) {
       if (value.length < MIN_SECRET_LEN) continue

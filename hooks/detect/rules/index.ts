@@ -7,8 +7,6 @@ import { devtoolsRules } from './devtools'
 import { gitRules } from './git'
 import { llmRules } from './llm'
 
-export { builtinRules, chatRules, cloudRules, devtoolsRules, gitRules, llmRules }
-
 /**
  * Every rule, in group order. When two rules claim the same value the first
  * one wins, so a specific vendor rule beats a generic shape.

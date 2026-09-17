@@ -5,10 +5,6 @@ import { garble } from './garble'
 import type { Entry, Provenance } from './persist'
 import { walk } from './walk'
 
-export { garble } from './garble'
-export { walk, isOpaque, MAX_DEPTH, MAX_STRING } from './walk'
-export * from './persist'
-
 const GARBLE_TRIES = 8
 
 /** Where a secret came from. Absent means it exists nowhere but this process. */

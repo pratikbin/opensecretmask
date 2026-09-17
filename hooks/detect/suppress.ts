@@ -41,11 +41,6 @@ function isCodeName(token: string): boolean {
   return words.every((w) => /^[A-Za-z]+$/.test(w) && w.length <= 14)
 }
 
-/** How many distinct characters the token draws on. A key spans a wide alphabet. */
-function alphabetWidth(token: string): number {
-  return new Set(token).size
-}
-
 /** A value that names a secret instead of being one: `$KEY`, `${KEY}`, `%KEY%`. */
 const REFERENCE = /^(?:\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%|<[^>]*>|\{\{[^}]*\}\}|\[[^\]]*\])$/
 
@@ -116,7 +111,7 @@ export function isSuppressed(token: string, before: string): boolean {
   if (isCodeName(token)) return true
   // A real key mixes cases and digits; 16 distinct characters is a low bar
   // that still excludes repetitive filler and base64-encoded prose.
-  if (alphabetWidth(token) < 16) return true
+  if (new Set(token).size < 16) return true
 
   return false
 }
