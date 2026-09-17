@@ -23,7 +23,10 @@ import type { Vault } from '../vault'
 export function registerAgentSpawn(on: On, vault: Vault) {
   on('agent.spawn', ($, e, next) => {
     const masked = guard(
-      () => ({ prompt: vault.mask(e.prompt), description: vault.mask(e.description) }),
+      () => ({
+        prompt: vault.mask(e.prompt, 'agent.spawn'),
+        description: vault.mask(e.description, 'agent.spawn'),
+      }),
       () => undefined,
     )
     return masked === undefined

@@ -20,7 +20,20 @@
 
 import { parseEnv } from '../env'
 
-export type EnvEntry = {
+/**
+ * How a secret was first found, carried across sessions.
+ *
+ * Without it every restored entry looked alike: `/osm-secrets` showed thirty
+ * rows all reading "literal via store" at the moment of the reload, which is
+ * true of the restore and says nothing about the secret.
+ */
+export type Provenance = {
+  rule?: string
+  where?: string
+  firstAt?: number
+}
+
+export type EnvEntry = Provenance & {
   kind: 'env'
   fake: string
   file: string
@@ -28,7 +41,7 @@ export type EnvEntry = {
   at: number
 }
 
-export type LiteralEntry = {
+export type LiteralEntry = Provenance & {
   kind: 'literal'
   fake: string
   secret: string

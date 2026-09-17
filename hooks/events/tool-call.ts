@@ -38,7 +38,7 @@ export function registerToolCall(on: On, vault: Vault, options: Options) {
     const up = await next(down)
 
     const masked = guard(
-      () => outbound(vault, up),
+      () => outbound(vault, up, e.tool),
       () => ({ deny: DENY_MASK }) as ToolCallResult,
     )
 

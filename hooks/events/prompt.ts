@@ -25,8 +25,8 @@ export function registerPrompt(on: On, vault: Vault) {
   on('prompt.submit', ($, e, next) => {
     const masked = guard(
       () => ({
-        text: vault.mask(e.text),
-        context: e.context?.map((block) => vault.mask(block)),
+        text: vault.mask(e.text, 'prompt'),
+        context: e.context?.map((block) => vault.mask(block, 'prompt')),
       }),
       () => undefined,
     )
@@ -39,7 +39,7 @@ export function registerPrompt(on: On, vault: Vault) {
   on('prompt.context', async ($, e, next) => {
     const { blocks } = await next(e)
     return guard(
-      () => ({ blocks: blocks.map((b) => ({ ...b, text: vault.mask(b.text) })) }),
+      () => ({ blocks: blocks.map((b) => ({ ...b, text: vault.mask(b.text, 'prompt.context') })) }),
       () => ({ blocks: [] }),
     )
   })
@@ -47,7 +47,7 @@ export function registerPrompt(on: On, vault: Vault) {
   on('prompt.section', async ($, e, next) => {
     const { text } = await next(e)
     return guard(
-      () => ({ text: typeof text === 'string' ? vault.mask(text) : text }),
+      () => ({ text: typeof text === 'string' ? vault.mask(text, 'prompt.section') : text }),
       () => ({ text: null }),
     )
   })

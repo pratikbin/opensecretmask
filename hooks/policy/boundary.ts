@@ -22,15 +22,15 @@ import { isModelFacing, RESERVED } from './model-facing'
  * those verbatim, which are the unmasked ones, so any rewrite must answer
  * without it. Stripping it here is the whole reason this function exists.
  */
-export function outbound(vault: Vault, up: ToolCallResult): ToolCallResult {
+export function outbound(vault: Vault, up: ToolCallResult, where = 'tool'): ToolCallResult {
   if (up.deny !== undefined) {
-    const deny = vault.mask(up.deny)
+    const deny = vault.mask(up.deny, where)
     return deny === up.deny ? up : { deny }
   }
 
-  const result = vault.maskDeep(up.result)
-  const text = up.text === undefined ? undefined : vault.mask(up.text)
-  const context = vault.maskDeep(up.context)
+  const result = vault.maskDeep(up.result, where)
+  const text = up.text === undefined ? undefined : vault.mask(up.text, where)
+  const context = vault.maskDeep(up.context, where)
 
   if (result === up.result && text === up.text && context === up.context) return up
 

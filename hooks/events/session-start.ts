@@ -7,6 +7,7 @@ import type { PersistPort } from '../vault/persist'
 import { load, save } from '../vault/persist'
 import { startLine, statusLine } from '../status'
 import type { Vault } from '../vault'
+import { SPEC } from './command'
 
 /**
  * Builds the exact-match layer at the start of a load.
@@ -27,6 +28,10 @@ export function registerSessionStart(on: On, vault: Vault, options: Options) {
       await save(portOf($), vault.entries())
     }
 
+    // Fire and forget: a refused registration costs the command, not the
+    // session that masks secrets.
+    void $.command.register(SPEC).catch(() => undefined)
+
     $.ui.log(startLine(registered, restored, RULES.length, options))
     const line = statusLine(vault.stats)
     if (line) $.ui.status(line)
@@ -45,6 +50,7 @@ async function restorePrevious(
       entry.fake,
       secret,
       entry.kind === 'env' ? { file: entry.file, key: entry.key } : undefined,
+      entry,
     )
   }
   return resolved.length
