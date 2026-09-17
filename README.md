@@ -205,7 +205,7 @@ Set an option with `/config` inside Claude Code, or write it into
         "entropyThreshold": 4.0,
         "entropyMinLen": 24,
         "envFiles": [".env", ".env.local"],
-        "persist": false,
+        "persist": true,
         "retentionDays": 120
       }
     }
@@ -307,9 +307,12 @@ hook can rewrite.
 
 In order of how much they buy you.
 
-**Leave `persist` off.** It is the default. Nothing of the plugin's own reaches
-the disk, and the only remaining exposure is the transcript, which you have
-with or without this plugin.
+**Turn `persist` off.** It ships on, because a map that dies with the plugin
+load breaks `--resume`, a fork and `/reload-plugins`, and the usual entry is
+env-backed and stores no secret. Off, nothing of the plugin's own reaches the
+disk and the only remaining exposure is the transcript, which you have with or
+without this plugin. On, a `literal` entry — a secret first seen in tool output
+— is written in plaintext for `retentionDays`.
 
 **Tighten the directories, which is durable.** The engine rewrites the store
 file and resets its mode, but it does not touch the mode of the directories

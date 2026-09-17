@@ -1,4 +1,4 @@
-// Optional persistence, so a fake still restores after a resume or a reload.
+// Persistence, so a fake still restores after a resume or a reload.
 //
 // The in-memory map dies with one load of the plugin. That is safe but it
 // breaks `--resume`, `--continue`, a fork and `/reload-plugins`: the replayed
@@ -16,7 +16,8 @@
 //           is the only kind that puts a new secret at rest, and the only kind
 //           the retention window applies to.
 //
-// Off unless `persist` is set. When it is off nothing is written at all.
+// On unless `persist` is turned off, because a map that dies with the plugin
+// load breaks every resume. Off, nothing is written at all.
 
 import { parseEnv } from '../env'
 

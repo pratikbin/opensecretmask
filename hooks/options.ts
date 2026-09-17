@@ -5,7 +5,7 @@ import { DEFAULT_DETECT, type DetectConfig } from './detect'
 export type Options = {
   detect: DetectConfig
   envFiles: string[]
-  /** Carry the map across a resume or a reload. Off by default: see persist.ts. */
+  /** Carry the map across a resume or a reload. On by default: see persist.ts. */
   persist: boolean
   /** How long a literal secret survives in the store. Env entries never expire. */
   retentionDays: number
