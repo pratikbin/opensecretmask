@@ -60,9 +60,13 @@ These are not style choices. Each one caused a bug.
 overruns its budget* and runs core in its place. For a masker that is worse
 than being absent, so every hook answers for itself via `policy/budget.ts`.
 
-The deadline must cover our own work and never a `next()` call. An earlier
-version wrapped `next()`, which charged every hook beneath us to our budget —
-a slow unrelated plugin made osm drop the user's prompt and blame itself.
+A guard must cover our own work and never a `next()` call. An earlier version
+wrapped `next()`, which charged every hook beneath us to our budget — a slow
+unrelated plugin made osm drop the user's prompt and blame itself.
+
+Every masking call is synchronous, so `guard` is a try/catch and not a timer.
+A `guardAsync` with a real deadline existed for two months and never had a
+caller; add one back only when an async hook actually needs it.
 
 **`ref` pins the unmasked messages.** `next(e)` returns a `ref` naming the
 messages core already built. Return it and core uses those verbatim — the
@@ -187,7 +191,7 @@ instead, because the engine rewrites the file.
 ## Build and test
 
 ```sh
-bun run scripts/unit-check.ts                          # 87 pure-logic checks
+bun run scripts/unit-check.ts                          # 85 pure-logic checks
 bun run scripts/hook-check.ts                          # 21 hook-level checks
 npx --yes --package typescript@5 tsc -p tsconfig.json  # NB: --package, see below
 bash scripts/local-e2e.sh                              # real model, 3 passes

@@ -13,7 +13,7 @@ const { isModelFacing, RESERVED } = await import(`${R}/policy/model-facing.ts`)
 const { inbound, outbound } = await import(`${R}/policy/boundary.ts`)
 const { isOpaque } = await import(`${R}/vault/walk.ts`)
 const { load, save, prune } = await import(`${R}/vault/persist.ts`)
-const { guard, guardAsync } = await import(`${R}/policy/budget.ts`)
+const { guard } = await import(`${R}/policy/budget.ts`)
 const { elide, secretsTable } = await import(`${R}/events/command.ts`)
 
 let pass = 0, fail = 0
@@ -142,13 +142,10 @@ console.log(`rules: ${RULES.length}\n`)
   ok('P env never expires', prune(entries.map(e => ({...e, at: 0})), 120, Date.now()).length === 1)
 }
 
-// budget: a hung hook denies instead of being skipped
+// budget: a hook that cannot mask denies instead of being skipped
 {
-  const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
   ok('B sync throw falls back', guard(() => { throw new Error('x') }, () => 'DENIED') === 'DENIED')
   ok('B sync ok wins', guard(() => 'OK', () => 'DENIED') === 'OK')
-  ok('B async hung falls back', (await guardAsync(() => new Promise(() => {}), () => 'DENIED', sleep, 50)) === 'DENIED')
-  ok('B async fast wins', (await guardAsync(async () => 'OK', () => 'DENIED', sleep, 500)) === 'OK')
 }
 
 // rules recovered from the Go proxy's detector, plus the PGP header it caught

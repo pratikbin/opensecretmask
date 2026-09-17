@@ -18,8 +18,8 @@ export type EnvSource = { file: string; key: string }
  * One secret's paper trail, for `/osm-secrets`.
  *
  * Written once when the fake is minted, then only counted up. `rule` says what
- * recognised the value, `where` the channel it first came through, and the two
- * timestamps bracket its working life.
+ * recognised the value, `where` the channel it first came through, and `at` is
+ * the first sighting.
  */
 export type LedgerEntry = {
   secret: string
@@ -29,7 +29,6 @@ export type LedgerEntry = {
   file?: string
   key?: string
   at: number
-  lastAt: number
   masked: number
   restored: number
 }
@@ -46,7 +45,6 @@ type Origin = { rule: string; where: string; source?: EnvSource }
  */
 export type Stats = {
   secrets: number
-  fromEnv: number
   masked: number
   restored: number
 }
@@ -64,12 +62,12 @@ export class Vault {
   readonly #envSource = new Map<string, EnvSource>()
   readonly #ledger = new Map<string, LedgerEntry>()
 
-  // Both directions scan longest-first so a value containing another is
-  // substituted whole. Sorting per call meant sorting the whole key set once
-  // per string in every tool result; the maps only ever grow, so caching and
-  // clearing on insert gives the same order for the cost of one sort per new
-  // secret.
-  #secretsByLength: string[] | undefined
+  // `unmask` substitutes straight down this list, so it must be longest-first:
+  // a fake containing another has to be replaced whole. Sorting per call meant
+  // sorting the whole key set once per string in every tool result; the map
+  // only ever grows, so caching and clearing on insert costs one sort per new
+  // secret. `mask` needs no such list — its candidates land in a set that it
+  // sorts once, just before substituting.
   #masksByLength: string[] | undefined
 
   #masked = 0
@@ -84,7 +82,6 @@ export class Vault {
   get stats(): Stats {
     return {
       secrets: this.#bySecret.size,
-      fromEnv: this.#envSource.size,
       masked: this.#masked,
       restored: this.#restored,
     }
@@ -93,7 +90,6 @@ export class Vault {
   #remember(secret: string, fake: string): void {
     this.#bySecret.set(secret, fake)
     this.#byMask.set(fake, secret)
-    this.#secretsByLength = undefined
     this.#masksByLength = undefined
   }
 
@@ -131,7 +127,6 @@ export class Vault {
       file: origin.source?.file,
       key: origin.source?.key,
       at: now,
-      lastAt: now,
       masked: 0,
       restored: 0,
     })
@@ -141,7 +136,6 @@ export class Vault {
     const entry = this.#ledger.get(secret)
     if (!entry) return
     entry[field] += n
-    entry.lastAt = Date.now()
   }
 
   /**
@@ -197,8 +191,7 @@ export class Vault {
     // ones registered from a file. A value first caught by a context-bearing
     // rule (`aws_secret_access_key = "…"`) must still be masked when it turns
     // up later on its own, where no rule would fire.
-    this.#secretsByLength ??= [...this.#bySecret.keys()].sort((a, b) => b.length - a.length)
-    for (const secret of this.#secretsByLength) {
+    for (const secret of this.#bySecret.keys()) {
       if (text.includes(secret)) candidates.add(secret)
     }
 

@@ -391,15 +391,18 @@ time budget and runs its own code in that hook's place. For a masking hook that
 outcome is worse than not being installed, because the unmasked content goes
 straight through.
 
-Each hook therefore answers for itself instead of letting the engine answer.
-The deadline covers this plugin's own work and never a `next()` call, because
-charging the hooks beneath us to our budget would drop your prompt whenever
-some other plugin is slow. A visible refusal beats an invisible leak.
+Each hook therefore answers for itself instead of letting the engine answer. A
+guard covers this plugin's own work and never a `next()` call, because charging
+the hooks beneath us to our budget would drop your prompt whenever some other
+plugin is slow. A visible refusal beats an invisible leak.
+
+Every masking call is synchronous, so a guard is a plain try/catch rather than
+a timer: synchronous work cannot overrun a deadline it blocks.
 
 ## Tests
 
 ```sh
-bun run scripts/unit-check.ts   # 87 checks on the pure logic
+bun run scripts/unit-check.ts   # 85 checks on the pure logic
 bun run scripts/hook-check.ts   # 21 checks on the hooks, through a fake engine
 npx --yes --package typescript@5 tsc -p tsconfig.json
 claude plugin validate .claude-plugin/plugin.json   # the engine must accept the hooks

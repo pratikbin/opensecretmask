@@ -170,7 +170,7 @@ guards this.
 
 | Command | Covers | Needs |
 | --- | --- | --- |
-| `bun run scripts/unit-check.ts` | Detection, vault, `.env`, persistence, budget | bun |
+| `bun run scripts/unit-check.ts` | Detection, vault, `.env`, persistence, guards | bun |
 | `bun run scripts/hook-check.ts` | The six hooks, through a fake engine | bun |
 | `npx --yes --package typescript@5 tsc -p tsconfig.json` | Types | npx |
 | `claude plugin validate .claude-plugin/plugin.json` | The engine accepts the module | Claude Code |
