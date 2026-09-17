@@ -40,7 +40,7 @@
       "type": "boolean",
       "title": "Persist the map",
       "description": "Carry the fake-to-secret map across a resume, a fork or a reload. Writes a plaintext file under the Claude Code configuration directory.",
-      "default": false
+      "default": true
     },
     "retentionDays": {
       "type": "number",
