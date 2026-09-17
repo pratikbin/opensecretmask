@@ -1,4 +1,4 @@
-// Written by Claude Code 2.1.273.
+// Written by Claude Code 2.1.274.
 // Claude Code function hooks: the plugin API's TypeScript declarations.
 //
 // EARLY ACCESS: this surface may change between releases without notice.
@@ -149,7 +149,8 @@ declare module 'claude-code' {
    * offers it to the model.
    *
    * Listed for the model (the agent listing) or named by it at dispatch
-   * (`subagent_type`): the same event at each.
+   * (`subagent_type`): the same event at each. Model-facing only: a plugin's
+   * own `$.agent.spawn` of a type is no offer, and `agent.spawn` governs it.
    */
   export type AgentOfferInput = {
       /**
@@ -312,6 +313,98 @@ declare module 'claude-code' {
       deny: string;
       model?: undefined;
       agentId?: undefined;
+  };
+
+  /**
+   * What `$.agent.register` takes: an agent type this plugin defines, spelled
+   * as an agent definition in settings JSON is, plus its `name`.
+   *
+   * Every field an agent file or `--agents` entry may carry is here and takes
+   * effect as it does there; the engine validates it with the same schema.
+   */
+  type AgentSpec = {
+      /**
+       * The type's short name (letters, digits, `_`, `-`; up to 64); the type is
+       * `<plugin>:<name>`, as a plugin's agent file `agents/<name>.md` names one.
+       */
+      name: string;
+      /**
+       * When to delegate to this agent: the line the model reads in its listing
+       * of agent types, and `agent.offer`'s `description`.
+       */
+      description: string;
+      /**
+       * The agent's system prompt, whole: it replaces the session's.
+       */
+      prompt: string;
+      /**
+       * What the agent may call, by tool name (`Read`, `Bash`, `mcp__x__y`); a
+       * call to any other is refused. Left out: every tool the parent has.
+       */
+      tools?: readonly string[];
+      /**
+       * Tools withheld from the agent, by name, out of whatever `tools` allows.
+       */
+      disallowedTools?: readonly string[];
+      /**
+       * The agent's model: an alias (`haiku`, `sonnet`, `opus`), a full id, or
+       * `inherit` for the parent's. Left out: the session's subagent default.
+       */
+      model?: string;
+      /**
+       * The agent's effort: a level (`low`, `medium`, `high`, `xhigh`, `max`)
+       * or an integer budget.
+       */
+      effort?: string | number;
+      /**
+       * How the agent's permission asks are decided, a mode: `default`,
+       * `acceptEdits`, `plan`, `auto`, `dontAsk` or `bypassPermissions`.
+       *
+       * Left out: the parent's.
+       */
+      permissionMode?: string;
+      /**
+       * Servers connected over MCP for the agent's run: a configured server's
+       * name, or `{ "<name>": { command, args } }`, one server's config inline.
+       */
+      mcpServers?: readonly (string | Record<string, unknown>)[];
+      /**
+       * Settings hooks in force while the agent runs, in settings.json's `hooks`
+       * shape (`{ PreToolUse: [{ matcher, hooks: [...] }] }`).
+       */
+      hooks?: Record<string, unknown>;
+      /**
+       * The most turns the agent takes before it stops.
+       */
+      maxTurns?: number;
+      /**
+       * Preloaded into the agent's context before its first turn: skill names.
+       */
+      skills?: readonly string[];
+      /**
+       * The agent's first user turn; `{{intent}}` in it takes the spawn's prompt.
+       * Left out: the spawn's prompt is the first turn.
+       */
+      initialPrompt?: string;
+      /**
+       * A persistent memory the agent keeps between runs, and where: `user`,
+       * `project` or `local`.
+       */
+      memory?: 'user' | 'project' | 'local';
+      /**
+       * Set so that every spawn of the agent runs in the background.
+       */
+      background?: true;
+      /**
+       * Set so that the agent's context carries no CLAUDE.md block (the person's,
+       * the project's, the rules): it takes what it needs from its prompt.
+       */
+      omitClaudeMd?: true;
+      /**
+       * Where the agent runs apart from the session: `worktree`, a git worktree
+       * of its own; `remote`, a cloud session where the build allows one.
+       */
+      isolation?: 'worktree' | 'remote';
   };
 
   /**
@@ -487,17 +580,22 @@ declare module 'claude-code' {
   };
 
   /**
-   * The `Box` props a `hover` may override, none of which moves layout, and
-   * `scope`, which names the hover group the Box joins instead of a style.
+   * The `Box` props a `hover` may override, none of which moves the Box's
+   * siblings, and `scope`, which names the hover group the Box joins.
    *
-   * `display` is `"flex"` alone, on a Box drawn `display: "none"` inside a
-   * visible keyed Box, and never beside a `scope` (a group lit from another
-   * site would move what the pointer is over); `borderStyle` only restyles.
+   * `display` is `"flex"` alone, on a Box drawn `display: "none"`: with a
+   * `scope`, every member of the lit group is revealed, in whichever site it
+   * sits, so a pointer on a glyph in the transcript can swap an entry into a
+   * fixed row of the band, or reveal an absolutely positioned card.
+   * `borderStyle` only restyles a border the Box has; the offsets move a Box
+   * drawn `position: "absolute"`, none in the flow. The surface applies a
+   * hover as the pointer moves, so a reveal that moves what the pointer rests
+   * on is drawn once, not in a loop.
    */
   export type BoxHoverProps = {
       /**
        * Names a hover group of this plugin's: every element it draws with the
-       * same `scope`, in any site on the surface, lights while any is hovered.
+       * same `scope`, in any site, lights while any is hovered, reveals included.
        *
        * A Pane row and a mark on a transcript message can share one. Another
        * plugin's elements under the same string are a different group. One to
@@ -509,31 +607,71 @@ declare module 'claude-code' {
       borderDimColor?: boolean;
       backgroundColor?: string;
       display?: 'flex';
+      top?: number;
+      left?: number;
+      right?: number;
+      bottom?: number;
   };
 
   /**
-   * The props of `Box`: the layout, margin, padding and border props of Ink's
-   * Box a tree may set, and the two of hover.
+   * The props of `Box`: the layout, position, margin, padding and border props
+   * of Ink's Box a tree may set, and the two of hover.
    */
   export type BoxProps = {
       /**
        * Makes the Box a hover scope: while the pointer is anywhere over it, its
        * own `hover` and that of every element beneath it apply.
        *
-       * A nested Box with a `key` of its own scopes what is beneath it. A key a
-       * sibling Box already took, or one that is no plain string, names no
-       * scope: the Box draws, and hovers beneath it stay inert.
+       * A nested Box with a `key` of its own scopes what is beneath it, a placed
+       * card outside its rows included. A key a sibling Box already took, or one
+       * that is no plain string, names no scope: hovers beneath it stay inert.
        */
       key?: string;
       /**
        * Style overrides applied by the surface while the pointer is over the
        * nearest keyed `Box`, this one included, or, given a `scope`, its group.
        *
-       * Never a layout change; no hook runs and nothing crosses to the plugin.
-       * To reveal on hover, draw a Box `display: "none"` with `hover: { display:
-       * "flex" }` inside a visible keyed Box; a scoped hover never reveals.
+       * No hook runs and nothing crosses to the plugin. To reveal on hover, draw
+       * the Box `display: "none"` with `hover: { display: "flex" }` in a visible
+       * keyed Box or under a `scope`; on a `position: "absolute"` Box, no reflow.
        */
       hover?: BoxHoverProps;
+      /**
+       * `"absolute"` leaves the flow, as in CSS: placed against its parent by
+       * the offsets, no room among its siblings, painted over those before it.
+       *
+       * So showing or moving it (a hover may) moves nothing; the pointer on it is
+       * on its parent. Clipped, pointer and paint, by the region its site is in
+       * (viewport, pane, band), by the site itself on the main screen or export.
+       *
+       * @example <Box key="k"><Text>glyph</Text><Box position="absolute" top={-2}
+       *   left={2} display="none" hover={{ display: 'flex' }}>the card</Box></Box>
+       */
+      position?: 'relative' | 'absolute';
+      /**
+       * Rows from the parent's top edge, in character cells: an integer,
+       * negative above the edge.
+       *
+       * With `bottom` and no `height` the Box spans the two.
+       */
+      top?: number;
+      /**
+       * Columns from the parent's left edge, in character cells: an integer,
+       * negative left of the edge.
+       *
+       * With `right` and no `width` the Box spans the two.
+       */
+      left?: number;
+      /**
+       * Columns from the parent's right edge, in character cells: an integer,
+       * negative right of the edge.
+       */
+      right?: number;
+      /**
+       * Rows from the parent's bottom edge, in character cells: an integer,
+       * negative below the edge.
+       */
+      bottom?: number;
       flexDirection?: 'row' | 'column' | 'row-reverse' | 'column-reverse';
       flexGrow?: number;
       flexShrink?: number;
@@ -935,9 +1073,9 @@ declare module 'claude-code' {
    * The element table a surface module draws with, `surface.elements`: the
    * terminal's (Elements) less `Client` (none nests) and `Raster` (needs `$`).
    *
-   * What `$.ui.resolve(e)` is to a hooks module, with no `$` and no hook
-   * between: `const { Box, Text } = surface.elements`, then `<Box>`. A Button,
-   * Input or Select keeps its handler here and still raises `ui.press` etc.
+   * What `$.ui.resolve(e)` is to a hooks module, with no `$`: `const { Box } =
+   * surface.elements`. A Button, Input or Select keeps its handler here and
+   * still raises `ui.press` etc.; a Markdown draws here without `onLinkPress`.
    */
   export type ClientElements = Omit<Elements['terminal'], 'Client' | 'Raster'>;
 
@@ -1319,14 +1457,19 @@ declare module 'claude-code' {
 
   /**
    * What a `command.run` hook returns and what `next(e)` and `$.command.run`
-   * resolve to: the command's output text, when it has one.
+   * resolve to: the command's output text and the notes it leaves the model.
    *
    * From core, `text` is what the command printed (a `local` command's
-   * returned text; a panel command may print nothing) and `ref` names the
-   * run. A hook's own answer without `next` runs no command: its `text` is
-   * shown as the command's output, under the names of the plugins hooking
-   * the command unless each is bundled with Claude Code, whose answer reads
-   * as the built-in command's own.
+   * returned text; a panel command may print nothing), `context` what it
+   * recorded for the model beside that, and `ref` names the run.
+   *
+   * A hook's own answer without `next` runs no command: its `text` is shown
+   * as the command's output, under the names of the plugins hooking the
+   * command unless each is bundled with Claude Code, whose answer reads as
+   * the built-in command's own, and its `context` is recorded after it.
+   *
+   * Both are the plugin's to size, as a core command's output is; what bounds
+   * them is what bounds any transcript row where a surface draws it.
    */
   export type CommandRunResult = {
       /**
@@ -1334,6 +1477,15 @@ declare module 'claude-code' {
        * command showed nothing as text (a panel, a prompt for the model).
        */
       text?: string;
+      /**
+       * What the model reads after the command's output and the person never
+       * sees, each entry one hidden user message recorded after the output row.
+       *
+       * From core, the notes the command left the model, absent when none. Kept
+       * whole from `next`: left out after `next`, the last answer's notes ride
+       * along; written, it keeps every entry that answer had (none empty).
+       */
+      context?: readonly string[];
       /**
        * Set by core on what `next(e)` resolves to: names the engine's run of
        * the command (its result stays on the host side).
@@ -2418,6 +2570,32 @@ declare module 'claude-code' {
            * the ones plugins did alike.
            */
           list: () => Promise<AgentInfo[]>;
+          /**
+           * Defines an agent type the Agent tool dispatches from the next turn on,
+           * named `<plugin>:<name>`: the event `agent.register`.
+           *
+           * Every field takes effect as in an agent file; re-registered, a name is
+           * replaced; unloaded, a plugin's types go. `agent.offer` hides it from
+           * the model alone; any plugin's `$.agent.spawn` answers to `agent.spawn`.
+           *
+           * @param spec `name`, `description` (when to delegate), `prompt` (its
+           *             system prompt), and any other field of an agent definition
+           * @returns `{ agent }`, the full name; rejects until the session binds,
+           *          on a spec the schema refuses (its reason), on a hook's deny
+           * @example
+           * await $.agent.register({ name: "runner", description: "Runs a spec",
+           *   prompt: RUNNER_PROMPT, tools: ["Read", "Bash"], omitClaudeMd: true })
+           * @example
+           * // runner-only: hidden from the model, spawned by this plugin's tool,
+           * // answered by the subagent's turn.complete (matched by agentId)
+           * on("agent.offer", { agent: "lab:runner" }, () => ({ isOffered: false }))
+           * on("tool.call", { tool: "mcp__lab__run" }, async ($, e) => {
+           *   const { agentId, deny } = await $.agent.spawn({
+           *     subagentType: "lab:runner", prompt: e.spec, description: "run" })
+           *   return { result: deny ?? (await answerOf(agentId)) }
+           * })
+           */
+          register: (spec: AgentSpec) => Promise<OpValueOf['agent.register']>;
       };
       /**
        * The file system as the engine's own process reaches it, text only
@@ -2718,9 +2896,9 @@ declare module 'claude-code' {
    * The element constructors each surface draws, by `e.surface`: what
    * `$.ui.resolve(e)` returns and a `ui.resolve` hook passes on; no globals.
    *
-   * All carry `Box`, `Text`, `Button`, `Link`, `Code`; every remote surface
-   * `Svg`; all but mobile `Input` and `Select`; terminal and desktop `Client`;
-   * terminal `Raster`. Narrowed on `e.surface`, that table; else the union.
+   * All carry `Box`, `Text`, `Button`, `Link`, `Code`, `Markdown`; every remote
+   * surface `Svg`; all but mobile `Input` and `Select`; terminal and desktop
+   * `Client`; terminal `Raster`. Narrowed on `e.surface`, that table.
    */
   export type Elements = {
       terminal: {
@@ -2731,6 +2909,7 @@ declare module 'claude-code' {
           Select: ElementConstructor<SelectProps>;
           Link: ElementConstructor<LinkProps>;
           Code: ElementConstructor<CodeProps>;
+          Markdown: ElementConstructor<MarkdownProps>;
           Client: ElementConstructor<ClientProps>;
           Raster: ElementConstructor<RasterProps>;
       };
@@ -2743,6 +2922,7 @@ declare module 'claude-code' {
           Svg: ElementConstructor<SvgProps>;
           Link: ElementConstructor<LinkProps>;
           Code: ElementConstructor<CodeProps>;
+          Markdown: ElementConstructor<MarkdownProps>;
           Client: ElementConstructor<ClientProps>;
       };
       /**
@@ -2758,6 +2938,7 @@ declare module 'claude-code' {
           Svg: ElementConstructor<SvgProps>;
           Link: ElementConstructor<LinkProps>;
           Code: ElementConstructor<CodeProps>;
+          Markdown: ElementConstructor<MarkdownProps>;
       };
       /**
        * The desktop's table without `Client`: a remote `Client`'s module, presses
@@ -2775,6 +2956,7 @@ declare module 'claude-code' {
           Svg: ElementConstructor<SvgProps>;
           Link: ElementConstructor<LinkProps>;
           Code: ElementConstructor<CodeProps>;
+          Markdown: ElementConstructor<MarkdownProps>;
       };
   };
 
@@ -3899,6 +4081,77 @@ declare module 'claude-code' {
   type Literal<X> = X extends RegExp ? unknown : X;
 
   /**
+   * What a `Markdown` carries across the boundary: its address, text, dimness
+   * and which links it answers; `onLinkPress` stays behind, a `press` instead.
+   */
+  export type MarkdownLeafProps = {
+      /**
+       * The element's address: what `e.element` carries and what a matcher
+       * names; present whenever the element carries a `press`.
+       */
+      key?: string;
+      /**
+       * The markdown drawn, bounded as a Text's string is.
+       */
+      text: string;
+      /**
+       * The whole block dim, as `Text`'s `dimColor`; absent draws as false.
+       */
+      dimColor?: boolean;
+      /**
+       * Which links a press belongs to, by `href` as written; absent, with a
+       * `press`, every link drawn. Compared with the pressed target only.
+       */
+      pressableLinks?: readonly string[];
+  };
+
+  /**
+   * The props of `Markdown`, a block of markdown every surface draws as it
+   * draws an assistant reply's text: its own renderer, links, tables, fences.
+   *
+   * A leaf: no children. `text` is the element's data as a `Text`'s string is,
+   * bounded the same way. With `onLinkPress` the links it draws are the
+   * plugin's to answer: a press on one raises `ui.press` addressed to `key`.
+   */
+  export type MarkdownProps = {
+      /**
+       * The element's address: `e.element` at `ui.press`, what a matcher names.
+       * Required with `onLinkPress`, since a press needs one; else optional.
+       */
+      key?: string;
+      /**
+       * The markdown drawn, as an assistant reply would write it.
+       *
+       * At most 10000 characters, tab and newline its only control characters;
+       * a link whose scheme is not `https:`, `http:` or `file:` draws as text,
+       * never clickable. Not drawn around the approval dialog.
+       */
+      text: string;
+      /**
+       * The whole block dim, as `Text`'s `dimColor`: a thought, an aside.
+       */
+      dimColor?: boolean;
+      /**
+       * What a press on a link in `text` runs, in the plugin's own environment:
+       * the bottom of a `ui.press` chain whose `e.link` names the link.
+       *
+       * A press is a plain single click where the surface reports clicks (the
+       * fullscreen terminal): it opens nothing and lands once no double-click
+       * followed; a ctrl, alt or terminal-kept cmd click opens it as before.
+       */
+      onLinkPress?: (link: PressedLink, e: UiPressArgument) => void;
+      /**
+       * Which links in `text` a press belongs to, by `href` as the markdown
+       * writes it; absent, every link drawn. Only with `onLinkPress`.
+       *
+       * A link left out keeps the surface's own behaviour. At most 256 entries
+       * of at most 2048 characters; compared with the pressed link's target,
+       * never opened.
+       */
+      pressableLinks?: readonly string[];
+  };
+
+  /**
    * The argument a matched hook receives: `e` narrowed by `M` (Narrowed), per
    * event the registration covers.
    */
@@ -4025,6 +4278,17 @@ declare module 'claude-code' {
        */
       mimeType?: string;
       [field: string]: unknown;
+  };
+
+  /**
+   * The MCP server serving this tool, for `mcp__*` tools: `name` is the server's config key (for `source: "sdk"`, exactly the name the SDK host registered in `sdkMcpServers` / `mcp_set_servers`; for any other source, the key as authored in that configuration - untrusted text, the same value `mcp_status` and system/init report, to be escaped before display), `source` is where its definition came from - `sdk` (an in-process server the SDK host runs; only the host can register one, so a configured server of the same name never reads `sdk`), `plugin` (a server a plugin ships or registers at runtime), or a config scope (`user`, `project`, `local`, `dynamic` for --mcp-config / `mcp_set_servers` process servers, `managed`, `enterprise`, `claudeai`, `agent`). Key trust on `source`, not on the name or the tool-name prefix. Absent for non-MCP tools.
+   */
+  type McpServerProvenance = {
+      name: string;
+      /**
+       * sdk | plugin | user | project | local | dynamic | managed | enterprise | claudeai | agent - an open set; treat unknown values as an unrecognized configured source, never as sdk.
+       */
+      source: string;
   };
 
   /**
@@ -4586,6 +4850,11 @@ declare module 'claude-code' {
        */
       'agent.list': NoArgs;
       /**
+       * The argument of `$.agent.register(spec)`: the agent type as the plugin
+       * defined it. A hook above rewrites any of it; the type stays the caller's.
+       */
+      'agent.register': AgentSpec;
+      /**
        * The argument of `$.ui.toast(text, { timeoutMs })`.
        */
       'ui.toast': {
@@ -4785,6 +5054,9 @@ declare module 'claude-code' {
       };
       'config.list': ConfigRow[];
       'agent.list': AgentInfo[];
+      'agent.register': {
+          agent: string;
+      };
       'ui.toast': void;
       'ui.status': void;
       'ui.log': void;
@@ -4971,6 +5243,7 @@ declare module 'claude-code' {
       tool_input: unknown;
       tool_use_id: string;
       reason: string;
+      mcp_server?: McpServerProvenance;
   };
 
   /**
@@ -4997,6 +5270,7 @@ declare module 'claude-code' {
       tool_name: string;
       tool_input: unknown;
       permission_suggestions?: PermissionUpdate[];
+      mcp_server?: McpServerProvenance;
   };
 
   type PermissionRuleValue = {
@@ -5268,6 +5542,7 @@ declare module 'claude-code' {
        * Tool execution time in milliseconds. Excludes permission-prompt and hook time.
        */
       duration_ms?: number;
+      mcp_server?: McpServerProvenance;
   };
 
   type PostToolUseHookInput = BaseHookInput & {
@@ -5280,6 +5555,7 @@ declare module 'claude-code' {
        * Tool execution time in milliseconds. Excludes permission-prompt and hook time.
        */
       duration_ms?: number;
+      mcp_server?: McpServerProvenance;
   };
 
   type PreCompactHookInput = BaseHookInput & {
@@ -5327,6 +5603,21 @@ declare module 'claude-code' {
   };
 
   /**
+   * The link a press landed on: one a `Markdown` drew, pressed where the
+   * surface reports presses (a plain click in the fullscreen terminal).
+   *
+   * What the surface knows of the cell pressed, not which occurrence: two
+   * links written with one target read the same here.
+   */
+  export type PressedLink = {
+      /**
+       * The link's target as the surface drew it: for an `https:` link, the
+       * href as the markdown wrote it.
+       */
+      href: string;
+  };
+
+  /**
    * The decision of a `classic.PreToolUse` result: `allow`, `ask`, `deny`, or
    * none.
    */
@@ -5363,6 +5654,7 @@ declare module 'claude-code' {
       tool_name: string;
       tool_input: unknown;
       tool_use_id: string;
+      mcp_server?: McpServerProvenance;
   };
 
   /**
@@ -6138,6 +6430,36 @@ declare module 'claude-code' {
       children?: undefined;
   } | {
       /**
+       * A block of markdown every surface draws as it draws an assistant
+       * reply's text: its own renderer, theme, hyperlinks and highlighting.
+       *
+       * Built by `<Markdown>` or the table's `t.Markdown`. A leaf: `text` is
+       * bounded as a Text's string is, or the tree is refused. Without a
+       * `press` its links are the surface's own, opened as it opens links.
+       */
+      type: 'Markdown';
+      props: MarkdownLeafProps;
+      children?: undefined;
+  } | {
+      /**
+       * A `Markdown` whose plugin answers the links it drew (`onLinkPress`):
+       * a press on one raises `ui.press` with `e.link`, the surface opens none.
+       */
+      type: 'Markdown';
+      props: MarkdownLeafProps;
+      /**
+       * Where the `onLinkPress` handler lives: the plugin whose hook drew
+       * the element, and the handle its environment keeps the closure under.
+       *
+       * The runtime stamps the plugin as the tree leaves that hook.
+       */
+      press: {
+          plugin: string;
+          handle: number;
+      };
+      children?: undefined;
+  } | {
+      /**
        * A region one of the plugin's SURFACE MODULES, named by path, draws and
        * handles input for on the drawing thread, without `$` (ClientModule).
        *
@@ -6282,22 +6604,49 @@ declare module 'claude-code' {
           metadataSource?: string;
       };
       /**
-       * The user's own prompt in the transcript (the `> ...` row); a rewrite is
-       * drawn there and nowhere else (the stored message is untouched).
+       * A user-role transcript row: the person's prompt (`> ...`), a background
+       * task's notification, or a message another agent, teammate or session sent.
+       *
+       * `origin`, `task` and `from` tell them apart and are read-only; a rewrite
+       * of `text` draws in the row alone: the stored message, and the model's
+       * framing of another party's words as that party's, stay as they were.
        */
       UserMessage: {
           /**
-           * The prompt's text, as the row draws it.
+           * What the row shows: the prompt as typed, a notification's summary, or
+           * a message's body less the engine's framing (summary line included).
+           *
+           * A rewrite is printable, bounded text and draws where the engine draws
+           * the body; a teammate block of several frames or with a summary line
+           * keeps the engine's drawing, one string not being those parts.
            */
           text: string;
           /**
-           * Where the stored message came from, as `prompt.submit` named it
-           * (PromptOrigin): the composer's, a peer's, a notification's, a plugin's.
+           * Where the stored message came from, as `prompt.submit` named it: the
+           * composer's, a task notification's, a peer's, a channel's, a plugin's.
            *
-           * Read-only: a rewrite carries it on as received; one that changes or
-           * drops it is refused and the engine draws its own row.
+           * `unclassified` for a teammate's (its drain stamps none) and for a
+           * message stored before stamps. Read-only.
            */
           origin: PromptOrigin;
+          /**
+           * Whether the view draws the row in full: the ctrl+o transcript,
+           * `--verbose`, a surface with no ctrl+o (an export). Read-only.
+           *
+           * False, a message row is one dim line naming its sender; a hook that
+           * draws a compact row of its own passes when true, so ctrl+o shows all.
+           */
+          isExpanded: boolean;
+          /**
+           * What a notification row (`origin.kind` `task-notification`) reports
+           * on: its background task; absent on every other row. Read-only.
+           */
+          task?: UserMessageTask;
+          /**
+           * Who sent the message the row carries: another agent of this session, a
+           * teammate, another session, a channel; absent otherwise. Read-only.
+           */
+          from?: UserMessageFrom;
       };
       /**
        * One text block of an assistant reply in the transcript; a rewrite
@@ -7653,7 +8002,7 @@ declare module 'claude-code' {
   type StyledElement<Tag extends 'Box' | 'Text', Hover> = {
       type: Tag;
       /**
-       * A Box's layout, margin, padding and border props and the `key` that
+       * A Box's layout, position, spacing and border props and the `key` that
        * makes it a hover scope; a Text's colors and styles. Others are refused.
        */
       props?: Record<string, string | number | boolean>;
@@ -7661,9 +8010,9 @@ declare module 'claude-code' {
        * Style overrides the surface applies while the pointer is over the
        * nearest keyed Box, or over any member of the group `scope` names.
        *
-       * Plain data, no hook. Never a layout change: `borderStyle` restyles a
-       * border the Box has, `display` only reveals a Box drawn `"none"` inside
-       * a keyed Box, and never in a scope.
+       * Plain data, no hook. Nothing that moves a sibling: `borderStyle`
+       * restyles a border the Box has, `display` only reveals a Box drawn
+       * `"none"` (under a keyed Box or in a scope), an offset moves a placed Box.
        */
       hover?: Hover;
       /**
@@ -8971,8 +9320,8 @@ declare module 'claude-code' {
   };
 
   /**
-   * The argument of `ui.press`: a press on a `Button` a render hook drew.
-   * Flat and frozen like every event's.
+   * The argument of `ui.press`: a press on a `Button` a render hook drew, or
+   * on an answered `Markdown` link. Flat and frozen like every event's.
    *
    * Another plugin addresses one button by matcher:
    * `on("ui.press", { plugin: "explainer", element: "explain" }, ...)`.
@@ -8983,7 +9332,8 @@ declare module 'claude-code' {
        */
       plugin: string;
       /**
-       * The `key` the hook gave its `Button`: its address, what a matcher names.
+       * The `key` the hook gave its `Button` or `Markdown`: its address, what a
+       * matcher names.
        */
       element: string;
       /**
@@ -9001,6 +9351,14 @@ declare module 'claude-code' {
        * `if (e.surface === "terminal")` narrows `e`.
        */
       surface: RenderSurface;
+      /**
+       * Where the press landed, when the element is a `Markdown` whose links
+       * its plugin answers (`onLinkPress`); absent for a `Button`.
+       *
+       * A hook may rewrite its `href` for the hooks and the closure beneath; one
+       * that adds or drops it fails, and the press goes on beneath it.
+       */
+      link?: PressedLink;
   };
 
   /**
@@ -9265,6 +9623,62 @@ declare module 'claude-code' {
    */
   type UnionToIntersection<U> = (U extends unknown ? (member: U) => void : never) extends (member: infer I) => void ? I : never;
 
+  /**
+   * Who sent the message a `UserMessage` row carries, when someone other than
+   * the person did: another agent, a teammate, another session, a channel.
+   *
+   * Read-only. The sender's words are not the person's: the model reads them
+   * framed as that sender's whatever a hook draws for the row.
+   */
+  type UserMessageFrom = {
+      /**
+       * The sender's name as the row shows it: a subagent's name, else its type;
+       * a teammate's; another session's title; a channel's sender, else server.
+       *
+       * One printable line: control and format characters stripped, whitespace
+       * collapsed, length bounded. Absent (no `from`) for a teammate block whose
+       * frames name different senders or none.
+       */
+      name: string;
+  };
+
+  /**
+   * The background task a `UserMessage` notification row reports on: a
+   * subagent, a background shell, a workflow, a remote agent, a monitor.
+   *
+   * Every field is the notification's own, so the row names the same task on
+   * every draw, a resumed session's included; the session's record of it
+   * (name, type, description) is `$.agent.list()`'s, by `id`. Each string is
+   * one printable line, bounded (a forged envelope's bytes capped). Read-only.
+   */
+  type UserMessageTask = {
+      /**
+       * The task's id as the notification names it; for a subagent, the
+       * `agentId` its `turn.complete` carried and `$.agent.list()` keys.
+       */
+      id?: string;
+      /**
+       * How the task ended: `completed`, `failed` or `killed` (stopped, by the
+       * person or by Claude), or another word its producer wrote.
+       */
+      status?: string;
+      /**
+       * What kind of task, when the notification says (`remote_agent`, an
+       * artifact watch's kind); a subagent's and a shell's leave it out.
+       */
+      type?: string;
+      /**
+       * Which call started the task: its `tool_use_id`, when the notification
+       * carries it.
+       */
+      toolUseId?: string;
+      /**
+       * How long the task ran, in milliseconds, when the notification says; the
+       * row draws it after the summary (`2m 2s`).
+       */
+      durationMs?: number;
+  };
+
   type UserPromptExpansionHookInput = BaseHookInput & {
       hook_event_name: 'UserPromptExpansion';
       expansion_type: 'slash_command' | 'mcp_prompt';
@@ -9438,6 +9852,7 @@ declare module 'claude-code/testing' {
   import type { EventName } from 'claude-code';
   import type { HookStream } from 'claude-code';
   import type { On } from 'claude-code';
+  import type { PressedLink } from 'claude-code';
   import type { Register } from 'claude-code';
   import type { ResultOf } from 'claude-code';
   import type { StreamingEventName } from 'claude-code';
@@ -9507,15 +9922,17 @@ declare module 'claude-code/testing' {
   export type EngineNounEvent<N extends keyof EventCalls> = Exclude<keyof EventCalls[N] & string, `${N}.resolve` extends 'ui.resolve' ? 'resolve' : never>;
 
   /**
-   * The terminal pressing a Button a test rendered: the `ui.press` chain over
-   * every plugin hooked on it, the Button's own `onPress` at the bottom.
+   * The terminal pressing a Button a test rendered, or a Markdown's link: the
+   * `ui.press` chain over every plugin hooked on it, its own closure last.
    */
   export type EnginePress = {
       /**
-       * Presses the Button, as a click or its hotkey does.
+       * Presses the Button, as a click or its hotkey does; with `link`, the
+       * Markdown's link, as a click on it does.
        *
-       * @param target whose Button, its key, and the instance when several
-       * @returns what the chain settled on; rejects when no such Button is
+       * @param target whose element, its key, the instance when several, and
+       *   for a Markdown the link
+       * @returns what the chain settled on; rejects when no such element is
        *   drawn on the terminal, or several are and no instance is named
        */
       press: (target: PressTarget) => Promise<UiPressResult | undefined>;
@@ -9877,13 +10294,14 @@ declare module 'claude-code/testing' {
   export type PluginTier = Exclude<Tier, 'core'>;
 
   /**
-   * What `$.ui.press` takes: the plugin whose `ui.render` hook drew the Button,
-   * the `key` it gave it, and the instance when it drew one in several.
+   * What `$.ui.press` takes: the plugin whose `ui.render` hook drew the element,
+   * the `key` it gave it, the instance when several, and a Markdown's `link`.
    */
   export type PressTarget = {
       plugin: string;
       key: string;
       requestId?: string;
+      link?: PressedLink;
   };
 
   /**
@@ -9968,32 +10386,44 @@ declare module 'claude-code' {
       isolation?: "worktree" | "remote"
     }
     Artifact: {
-      /** One of 'publish', 'list', 'read', 'delete', 'pin', 'unpin'. Omitting it means 'publish'. **Calls** in the description says what each one does and takes, except as noted here. */
-      action?: "publish" | "list" | "read" | "delete" | "pin" | "unpin"
-      /** publish: the local page Claude publishes (.html, or .md only when a skill says so). With `asset: true`, it is the local file Claude uploads. A short, distinctive basename also serves as the title when nothing else gives one. */
+      /** One of 'publish', 'list', 'read', 'delete', 'open', 'pin', 'unpin', 'quickstart'. Omitting it means 'publish'. **Calls** in the description says what each one does and takes, except as noted here. */
+      action?: "publish" | "list" | "read" | "delete" | "open" | "pin" | "unpin" | "quickstart"
+      /** publish: the local page Claude publishes (.html, or .md only when a skill says so). For an Artifact created from an Artifact type, it is one of that Artifact's data files. With `asset: true`, it is the local file Claude uploads. A short, distinctive basename also serves as the title when nothing else gives one. */
       file_path?: string
-      /** publish with `url`: true uploads `file_path` to that artifact's asset store instead of publishing it as the page (see **Calls**). */
+      /** publish with `url`: true uploads `file_path` to that artifact's asset store instead of publishing it as the page — or, with `from_url` and `asset_ids` in place of `file_path`, copies those assets of another artifact into it server side (see **Calls**). */
       asset?: boolean
-      /** One or two emoji for the browser-tab icon (e.g. "📊"), with no markup. Required on a page's first publish. On a redeploy Claude omits it so the artifact keeps its icon, and passes a new one only when the person asks. */
+      /** publish with `asset: true`, in place of `file_path`: the SOURCE artifact's claude.ai URL — one the person can open, in their organization. */
+      from_url?: string
+      /** publish with `asset: true` and `from_url` only: 1–10 distinct asset ids from the source artifact (from a `scope: "assets"` listing of it, or an upload result). */
+      asset_ids?: string[]
+      /** One or two emoji for the browser-tab icon (e.g. "📊"), with no markup. Required on a page's first publish. On a redeploy Claude omits it so the artifact keeps its icon, and passes a new one only when the person asks. Optional with `type_url` and for a typed Artifact's data files. */
       favicon?: string
-      /** Optional. One short generic word for the artifact's tab icon, such as chart, calendar, recipe, code or map — a plain signifier, not a product or brand name. Omit when republishing to keep the current icon. */
+      /** Optional. One short generic word for the artifact's tab icon, such as chart, calendar, recipe, code or map — a plain signifier, not a product or brand name. Omit when republishing to keep the current icon. Ignored on an Artifact created from an Artifact type. */
       icon?: string
-      /** Supporting files to publish alongside the page, as a map {"published/path": "source/path" | {from, contentType} | null}. The key is what the HTML references. The source is a path on disk, or {from, contentType} when the type cannot be inferred from the published extension. null removes that path on an update, and files left out are kept. A plain list publishes each file at its own spelling. Sources must be under the working directory or Claude's scratchpad directory. `preflight.js` at the artifact root is reserved: it runs against open pages when Claude publishes updates, and it must be a JavaScript module of at most 8 KiB whose default export is a function, or the publish is refused. */
+      /** Supporting files to publish alongside the page, as a map {"published/path": "source/path" | {from, contentType} | {artifact, path, ver?} | null}. The key is what the HTML references. The source is a path on disk, or {from, contentType} when the type cannot be inferred from the published extension. An {artifact, path} source copies that Artifact's published file on the server: an Artifact the person can open in the same organization, with its type carried over, never an HTML, SVG or XML document, and at most 4 source Artifact versions per publish. null removes that path on an update, and files left out are kept. A plain list publishes each file at its own spelling. Sources must be under the working directory or Claude's scratchpad directory. `preflight.js` at the artifact root is reserved: it runs against open pages when Claude publishes updates, and it must be a JavaScript module of at most 8 KiB whose default export is a function, or the publish is refused. */
       files?: Array<{
         /** Path relative to the working directory (or to `root`, which may be a folder in your scratchpad directory); the file is served at this same path next to the page. */
         path: string
         /** Servable media type; inferred from the extension for common types (css/js/json/png/…) — pass explicitly otherwise. */
         contentType?: string
       }> | {}
-      /** The base directory that relative `files` sources resolve against, like a bundler root. It never changes published paths. It is relative to the working directory, or absolute within it or within Claude's scratchpad directory. It requires `files`. */
+      /** The base directory that relative `files` sources resolve against, like a bundler root. It never changes published paths. It is relative to the working directory, or absolute within it or within Claude's scratchpad directory. It requires `files`, except on an Artifact made from a type, where a data `file_path` under it is served at its path relative to it. */
       root?: string
       /** publish only: true also pins the published artifact to the person's claude.ai sidebar once it is published. Claude passes it only when the person asked for that. A failed pin never fails the publish, and the result says so. */
       pin?: boolean
       /** list only: the maximum number of artifacts to return (default 25). */
       limit?: number
-      /** list: which listing to return. 'mine' is the default. The others are 'shared', 'all', 'files' (with `url`) and 'assets' (with `url`, continued with `after`). See **Calls**. */
+      /** list: which listing to return. 'mine' is the default. The others are 'shared', 'all', 'types', 'files' (with `url`) and 'assets' (with `url`, continued with `after`). See **Calls**. */
       scope?: "mine" | "shared" | "all" | "types" | "files" | "assets"
-      /** publish: the fallback title for an HTML page whose file has no <title>. It is a name, not a summary, and Claude keeps it the same across redeploys. */
+      /** list with scope 'types' only: limits the listing to types whose title or description contains this text, ignoring case. Omitting it lists them all. */
+      type_query?: string
+      /** list only: the name of a published Artifact type, as a 'types' listing shows it (case does not matter). The listing then shows the Artifacts made from that type instead of the person's gallery. Claude passes this or `type_url`, not both. */
+      type?: string
+      /** quickstart only (required): what is being made — 'document' (text to read or edit together), 'slides' (a deck or one slide), 'design' (a visual design or prototype on a canvas), 'other' (anything else, or unsure). */
+      intent?: "document" | "slides" | "design" | "other"
+      /** quickstart only: false when a design system's link is already in hand (it is then read with its own call) or one was declined. Omitted or true, the result lists the design systems (not for a document) and, for slides or a design, attaches the default one's README. */
+      design_systems?: boolean
+      /** publish: the fallback title for an HTML page whose file has no <title>. It is a name, not a summary, and Claude keeps it the same across redeploys. On a `type_url` create, it is the new Artifact's name: what the person called it, or a short descriptive name. If it is left out, the Artifact is named after the type. */
       title?: string
       /** publish: one sentence for the subtitle on the gallery card. */
       description?: string
@@ -10003,6 +10433,10 @@ declare module 'claude-code' {
       overwrite_unread?: string[]
       /** An existing artifact's claude.ai URL. On a publish, it is the artifact to update in place, which must be one the person owns; Claude omits it for a new artifact or a redeploy in the same conversation (see **To update an artifact from an earlier conversation**). For read, delete and the other calls that take a URL, it is the artifact to act on. */
       url?: string
+      /** publish: the Artifact type to create this new, private Artifact from (a link from a 'types' listing). Claude omits `url`. Any `file_path`/`files` passed become the new Artifact's own files beside the type's fixed ones. read (no `url`): the type to describe. list: the type whose Artifacts to list, or Claude names the type with `type` instead. */
+      type_url?: string
+      /** Only with `type_url` and no `file_path`: when the new Artifact opens for the person. Claude passes "after_first_write" when it will fill the Artifact right after creating it with a files publish to its url, so the person does not first see it empty. The Artifact then opens on that first write. Otherwise Claude omits it, and the Artifact opens when created. */
+      auto_open?: "at_create" | "after_first_write"
       /** read, for an artifact shared with the person: what Claude needs from it, which steers the isolated summary. */
       prompt?: string
       /** publish: a last-resort overwrite that **discards** the newer published version. On a conflict, Claude merges its changes onto the newer content that the rejection hands it and publishes again. Claude passes true only when the person explicitly said to discard that specific version, and the server may still refuse it over a version saved from inside the page. */
@@ -10015,6 +10449,8 @@ declare module 'claude-code' {
       paths?: string[]
       /** list with scope 'assets' only: the `next` value from a previous listing, passed to continue it. */
       after?: string
+      /** read only: true returns the rendered page in cases where a read otherwise returns something else. A typed Artifact's read leaves out the type's own page. */
+      page?: boolean
       /** publish: the runtime capabilities this page declares, as {name: config}. Claude loads the `artifact-capabilities` skill before passing it. On a redeploy Claude omits the field to keep what the page has, and {} clears it. */
       capabilities?: {}
       /** publish: the artifact's runtime version. Leaving it out keeps the current version (the default), 'latest' upgrades, and an exact version pins or rolls back. It changes how the published page behaves, so Claude passes it only when the author explicitly intends that change. */
@@ -10545,6 +10981,12 @@ declare module 'claude-code' {
       warnings?: string[]
       files_error?: string
       files_error_kind?: "type_owned_path"
+      provisioned?: {
+        store: string
+        project_id: string
+        file_id?: string
+        node_id?: string
+      }
       liveSubscription?: string
       pinned?: boolean
       instructions?: string
@@ -10600,7 +11042,26 @@ declare module 'claude-code' {
       liveSubscription?: string
       verifyGuide?: string
       seededThread?: string
+      copied?: {
+        path: string
+        from_url: string
+        from_path: string
+      }[]
       pinned?: boolean
+      /** The Artifact type (and release) this Artifact was created from */
+      type?: {
+        url: string
+        release: string
+        latest?: string
+        blocked?: {
+          to?: string
+          reason: string
+          conflict_count?: number
+          paths?: string[]
+        }
+      }
+      own_files?: string[]
+      type_files?: string[]
     } | {
       artifacts: Array<{
         title: string
@@ -10757,6 +11218,7 @@ declare module 'claude-code' {
           }
           skill_in_result: boolean
           capabilities_skill: boolean
+          repl_tool?: boolean
         }
       }
     } | {
@@ -11024,6 +11486,7 @@ declare module 'claude-code' {
         sha256: string
         cowritten?: true
         outside_writer?: true
+        public_read?: true
         foreign?: true
       }
     } | {
@@ -11060,6 +11523,8 @@ declare module 'claude-code' {
         }[]
         cowritten?: true
         outside_writer?: true
+        public_read?: true
+        narrowed?: true
         from_type?: true
         type?: {
           url: string
@@ -11088,6 +11553,7 @@ declare module 'claude-code' {
         seq?: number
         cowritten?: true
         outside_writer?: true
+        public_read?: true
         from_type?: true
         type?: {
           url: string
@@ -11117,6 +11583,7 @@ declare module 'claude-code' {
         }>
         cowritten?: true
         outside_writer?: true
+        public_read?: true
         from_type?: true
         type?: {
           url: string
@@ -11187,6 +11654,12 @@ declare module 'claude-code' {
       warnings?: string[]
       files_error?: string
       files_error_kind?: "type_owned_path"
+      provisioned?: {
+        store: string
+        project_id: string
+        file_id?: string
+        node_id?: string
+      }
       liveSubscription?: string
       pinned?: boolean
       instructions?: string
@@ -11242,7 +11715,26 @@ declare module 'claude-code' {
       liveSubscription?: string
       verifyGuide?: string
       seededThread?: string
+      copied?: {
+        path: string
+        from_url: string
+        from_path: string
+      }[]
       pinned?: boolean
+      /** The Artifact type (and release) this Artifact was created from */
+      type?: {
+        url: string
+        release: string
+        latest?: string
+        blocked?: {
+          to?: string
+          reason: string
+          conflict_count?: number
+          paths?: string[]
+        }
+      }
+      own_files?: string[]
+      type_files?: string[]
     } | {
       artifacts: Array<{
         title: string
@@ -11399,6 +11891,7 @@ declare module 'claude-code' {
           }
           skill_in_result: boolean
           capabilities_skill: boolean
+          repl_tool?: boolean
         }
       }
     } | {
@@ -11666,6 +12159,7 @@ declare module 'claude-code' {
         sha256: string
         cowritten?: true
         outside_writer?: true
+        public_read?: true
         foreign?: true
       }
     } | {
@@ -11702,6 +12196,8 @@ declare module 'claude-code' {
         }[]
         cowritten?: true
         outside_writer?: true
+        public_read?: true
+        narrowed?: true
         from_type?: true
         type?: {
           url: string
@@ -11730,6 +12226,7 @@ declare module 'claude-code' {
         seq?: number
         cowritten?: true
         outside_writer?: true
+        public_read?: true
         from_type?: true
         type?: {
           url: string
@@ -11759,6 +12256,7 @@ declare module 'claude-code' {
         }>
         cowritten?: true
         outside_writer?: true
+        public_read?: true
         from_type?: true
         type?: {
           url: string
@@ -11829,6 +12327,12 @@ declare module 'claude-code' {
       warnings?: string[]
       files_error?: string
       files_error_kind?: "type_owned_path"
+      provisioned?: {
+        store: string
+        project_id: string
+        file_id?: string
+        node_id?: string
+      }
       liveSubscription?: string
       pinned?: boolean
       instructions?: string
@@ -11884,7 +12388,26 @@ declare module 'claude-code' {
       liveSubscription?: string
       verifyGuide?: string
       seededThread?: string
+      copied?: {
+        path: string
+        from_url: string
+        from_path: string
+      }[]
       pinned?: boolean
+      /** The Artifact type (and release) this Artifact was created from */
+      type?: {
+        url: string
+        release: string
+        latest?: string
+        blocked?: {
+          to?: string
+          reason: string
+          conflict_count?: number
+          paths?: string[]
+        }
+      }
+      own_files?: string[]
+      type_files?: string[]
     } | {
       artifacts: Array<{
         title: string
@@ -12041,6 +12564,7 @@ declare module 'claude-code' {
           }
           skill_in_result: boolean
           capabilities_skill: boolean
+          repl_tool?: boolean
         }
       }
     } | {
@@ -12308,6 +12832,7 @@ declare module 'claude-code' {
         sha256: string
         cowritten?: true
         outside_writer?: true
+        public_read?: true
         foreign?: true
       }
     } | {
@@ -12344,6 +12869,8 @@ declare module 'claude-code' {
         }[]
         cowritten?: true
         outside_writer?: true
+        public_read?: true
+        narrowed?: true
         from_type?: true
         type?: {
           url: string
@@ -12372,6 +12899,7 @@ declare module 'claude-code' {
         seq?: number
         cowritten?: true
         outside_writer?: true
+        public_read?: true
         from_type?: true
         type?: {
           url: string
@@ -12401,6 +12929,7 @@ declare module 'claude-code' {
         }>
         cowritten?: true
         outside_writer?: true
+        public_read?: true
         from_type?: true
         type?: {
           url: string
