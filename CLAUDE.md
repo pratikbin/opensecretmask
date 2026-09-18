@@ -132,7 +132,9 @@ wall of one token repeated per character, the engine skips `prompt.context`
 and `prompt.section` for size, and the session is unusable until the store is
 cleaned — a reload alone does not help, because the entry is re-adopted.
 
-It cannot come from `register()`, which has always checked `MIN_SECRET_LEN`.
+Three doors lead into the map — `register()`, `maskOf()` and `adopt()` — and
+all three now check `MIN_SECRET_LEN`. `register()` always did; `maskOf()` is
+public and mints on the spot, so it was open until the tests went looking.
 It comes from the store: `load()` dropped an `env` entry only when its key was
 `undefined`, and a key emptied to `KEY=` reads `""`. Both ends now guard, and
 `adopt()` is the one that matters, because every store entry routes through it.
@@ -211,7 +213,7 @@ instead, because the engine rewrites the file.
 ## Build and test
 
 ```sh
-bun run scripts/unit-check.ts                          # 103 pure-logic checks
+bun run scripts/unit-check.ts                          # 111 pure-logic checks
 bun run scripts/hook-check.ts                          # 24 hook-level checks
 npx --yes --package typescript@5 tsc -p tsconfig.json  # NB: --package, see below
 bash scripts/local-e2e.sh                              # real model, 3 passes

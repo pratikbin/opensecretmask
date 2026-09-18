@@ -272,6 +272,21 @@ console.log(`rules: ${RULES.length}\n`)
   ok('EM text survives an attempted empty adopt', v.mask('hello world') === 'hello world')
   v.adopt('', KEY)
   ok('EM empty fake is refused', v.size === 0)
+
+  // maskOf is public and mints on the spot, so it is a door of its own.
+  const m = new Vault()
+  ok('EM maskOf returns an empty secret unchanged', m.maskOf('') === '')
+  ok('EM maskOf refuses a secret under the minimum', m.maskOf('short') === 'short')
+  ok('EM neither entered the map', m.size === 0)
+  ok('EM text survives an attempted empty maskOf', m.mask('abc') === 'abc')
+
+  // The trivial cases, so nobody has to re-derive that they are safe.
+  const t = new Vault()
+  t.register('')
+  ok('EM register refuses an empty secret', t.size === 0)
+  ok('EM masking an empty string is an empty string', t.mask('') === '')
+  ok('EM unmasking an empty string is an empty string', t.unmask('') === '')
+  ok('EM an empty string inside a tree is untouched', JSON.stringify(t.maskDeep({ a: '', b: [''] })) === '{"a":"","b":[""]}')
 }
 
 // round trip still works

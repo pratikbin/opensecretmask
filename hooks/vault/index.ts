@@ -157,6 +157,12 @@ export class Vault {
 
   /** `secret`'s fake, minted on first sight and stable for as long as the map lives. */
   maskOf(secret: string, origin?: Origin): string {
+    // The last door into the map, and the only one that was still open: `mask`
+    // never offers a short candidate and `register` checks, but this is public
+    // and mints on the spot. An empty secret here poisons every later mask, so
+    // anything below the minimum is returned as itself and never remembered.
+    if (secret.length < MIN_SECRET_LEN) return secret
+
     const known = this.#bySecret.get(secret)
     if (known) return known
 
