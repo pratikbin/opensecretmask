@@ -2,7 +2,7 @@
 //
 //   bun run scripts/hook-check.ts
 //
-// These cover the wiring that `scripts/unit-check.ts` cannot reach: the six
+// These cover the wiring that `scripts/unit-check.ts` cannot reach: the nine
 // hooks `register()` installs, driven through a fake engine.
 //
 // They replace tests/register.test.ts, which ran under `claude plugin test`.
@@ -54,9 +54,10 @@ function seat(stored?: unknown, envFiles: Record<string, string> = {}, options: 
   return { hooks, fire, logs, statuses }
 }
 
-ok('H all six hooks registered', (() => {
+ok('H all nine hooks registered', (() => {
   const { hooks } = seat()
-  return ['session.start', 'tool.call', 'agent.spawn', 'prompt.submit', 'prompt.context', 'prompt.section']
+  return ['session.start', 'tool.call', 'agent.spawn', 'prompt.submit', 'prompt.context',
+    'prompt.section', 'skill.prompt', 'session.receive', 'session.compact']
     .every((n) => hooks.has(n))
 })())
 
@@ -190,6 +191,54 @@ ok('H all six hooks registered', (() => {
   const up: any = await fire('tool.call', { tool: 'Bash', command: 'echo hi' },
     () => ({ result: { stdout: 'hello world' }, text: 'hello world' }))
   ok('E a poisoned store leaves a tool result alone', up.text === 'hello world')
+}
+
+// The channels that reach the model without passing `prompt.submit`.
+// Each one registers the secret through a tool result first, the way a real
+// session would, then checks that this channel no longer carries it.
+{
+  const { fire } = seat()
+  await fire('tool.call', { tool: 'Bash', command: 'cat .env' },
+    () => ({ result: { stdout: KEY }, text: KEY }))
+
+  const skill: any = await fire('skill.prompt', { skill: 'commit', text: `use ${KEY} to push` }, (e: any) => e)
+  ok('C skill prompt masked', !skill.text.includes(KEY))
+  ok('C skill prompt keeps its shape', skill.text.startsWith('use sk-ant-') && skill.text.endsWith(' to push'))
+
+  const got: any = await fire('session.receive', { origin: 'peer', text: `the key is ${KEY}` }, (e: any) => e)
+  ok('C delivery masked', !got.text.includes(KEY) && got.consumed === undefined)
+
+  const messages = [
+    { role: 'user', text: 'what is in the env file', toolUses: [], handle: 'h1' },
+    { role: 'assistant', text: `it holds ${KEY}`, toolUses: [], handle: 'h2' },
+  ]
+  const done: any = await fire('session.compact', { trigger: 'manual', messages }, (e: any) => e)
+  ok('C compaction masks the transcript', !JSON.stringify(done.messages).includes(KEY))
+  ok('C compaction keeps the handle of an untouched message', done.messages[0].handle === 'h1')
+  // A rewritten message must give its handle up, or the engine stands its own
+  // copy — the unmasked one — in place of ours.
+  ok('C compaction drops the handle of a masked message', done.messages[1].handle === undefined)
+  ok('C compaction masks a tool result inside a message', await (async () => {
+    const deep = [{ role: 'assistant', text: '', toolUses: [{ name: 'Bash', result: { stdout: KEY } }], handle: 'h3' }]
+    const out: any = await fire('session.compact', { trigger: 'auto', messages: deep }, (e: any) => e)
+    return !JSON.stringify(out.messages).includes(KEY)
+  })())
+}
+
+// A channel that cannot be masked must not pass the value on regardless.
+{
+  const { fire } = seat()
+  await fire('tool.call', { tool: 'Bash', command: 'cat .env' },
+    () => ({ result: { stdout: KEY }, text: KEY }))
+  const boom = () => { throw new Error('masking failed') }
+
+  const got: any = await fire('session.receive', { origin: 'relay', get text() { return boom() } }, (e: any) => e)
+  ok('C a delivery that cannot be masked is consumed', typeof got.consumed === 'string' && got.text === undefined)
+
+  const done: any = await fire('session.compact',
+    { trigger: 'manual', messages: [{ role: 'user', get text() { return boom() }, toolUses: [] }] },
+    (e: any) => e)
+  ok('C a compaction that cannot be masked is skipped', typeof done.skip === 'string' && done.messages === undefined)
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

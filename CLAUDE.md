@@ -20,12 +20,13 @@ Everything else in this codebase is negotiable. That is not.
 
 | Path | Owns |
 | --- | --- |
-| `hooks/register.ts` | Wiring. One `Vault`, five `register*` calls. No logic. |
+| `hooks/register.ts` | Wiring. One `Vault`, six `register*` calls. No logic. |
 | `hooks/options.ts` | `PluginOptions` → typed `Options` |
 | `hooks/env.ts` | `.env` parsing, comment- and quote-aware |
 | `hooks/events/session-start.ts` | `.env` registration + persistence restore |
 | `hooks/events/tool-call.ts` | The round trip, both directions |
-| `hooks/events/prompt.ts` | `prompt.submit` / `.context` / `.section` |
+| `hooks/events/prompt.ts` | The five channels that carry a prompt to the model |
+| `hooks/events/compact.ts` | `session.compact`, what the summarizer reads |
 | `hooks/events/agent-spawn.ts` | `agent.spawn`, the subagent boundary |
 | `hooks/events/command.ts` | `/osm-secrets`: one bounded `real → fake` line per secret |
 | `hooks/vault/index.ts` | The two-way map, and the ledger behind `/osm-secrets` |
@@ -80,6 +81,24 @@ caller; add one back only when an async hook actually needs it.
 **`ref` pins the unmasked messages.** `next(e)` returns a `ref` naming the
 messages core already built. Return it and core uses those verbatim — the
 unmasked ones. Any rewritten result must answer without `ref`.
+
+**A prompt has five doors, not three.** Beyond the three below, `skill.prompt`
+carries a skill's expanded text — skill bodies are files on disk and reach the
+model without passing `prompt.context` — and `session.receive` carries a
+delivery before it is queued: a relay event, a peer's message, a Remote
+Control prompt. That last one is a whole inbound path `prompt.submit` never
+sees. Neither answers with a drop: `skill.prompt` owes the engine a prompt, so
+it hands back an empty one, and `session.receive` answers `{ consumed }`,
+which drops the delivery without queueing it.
+
+**A compaction hands the transcript to a model.** `session.compact` is the one
+place where everything the session ever held is read at once and turned into a
+summary that survives every later turn. On a healthy session it changes
+nothing, because the model only ever saw fakes; it exists so that a secret
+arriving through a channel we do not hook cannot be laundered into something
+durable. Rewriting a message means surrendering its `handle` — the engine
+stands its own copy whole for a message that keeps one — so only the messages
+that actually change give it up.
 
 **`claudeMd` rides in `prompt.context`, not `prompt.section`.** Instruction
 files land in `prompt.context.blocks` under the name `claudeMd`.
@@ -225,7 +244,7 @@ instead, because the engine rewrites the file.
 
 ```sh
 bun run scripts/unit-check.ts                          # 117 pure-logic checks
-bun run scripts/hook-check.ts                          # 24 hook-level checks
+bun run scripts/hook-check.ts                          # 33 hook-level checks
 bun run scripts/corpus-check.ts                        # our rules vs upstream fixtures
 bun run scripts/fetch-corpus.ts                        # refresh corpus/, needs network
 npx --yes --package typescript@5 tsc -p tsconfig.json  # NB: --package, see below

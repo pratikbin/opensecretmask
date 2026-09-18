@@ -119,6 +119,9 @@ you, the model and the outside world. `osm` sits on seven of them.
 | `prompt.context` | files to model | Masks `claudeMd`, where instruction files land |
 | `prompt.section` | memory to model | Masks `memory` and the other prompt sections |
 | `agent.spawn` | model to model | Masks the task text handed to a subagent |
+| `skill.prompt` | disk to model | Masks a skill's expanded prompt |
+| `session.receive` | outside to model | Masks a relay, peer or Remote Control delivery |
+| `session.compact` | transcript to model | Masks what the summarizer reads at `/compact` |
 
 One `tool.call` registration covers Read, Bash, Grep, WebFetch, Write, the
 Agent tool and every MCP tool, because it matches the event and not a list of
@@ -406,7 +409,7 @@ a timer: synchronous work cannot overrun a deadline it blocks.
 
 ```sh
 bun run scripts/unit-check.ts   # 117 checks on the pure logic
-bun run scripts/hook-check.ts   # 24 checks on the hooks, through a fake engine
+bun run scripts/hook-check.ts   # 33 checks on the hooks, through a fake engine
 bun run scripts/corpus-check.ts # our rules against gitleaks, Nosey Parker and secretlint fixtures
 npx --yes --package typescript@5 tsc -p tsconfig.json
 claude plugin validate .claude-plugin/plugin.json   # the engine must accept the hooks
@@ -447,6 +450,7 @@ hooks/
   env.ts               .env parsing, comment-aware
   events/              one file per engine event
     session-start.ts  tool-call.ts  prompt.ts  agent-spawn.ts  command.ts
+    compact.ts
   vault/
     index.ts           the two-way map
     garble.ts          the format-preserving fake
