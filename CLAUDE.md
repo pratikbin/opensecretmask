@@ -132,12 +132,14 @@ wall of one token repeated per character, the engine skips `prompt.context`
 and `prompt.section` for size, and the session is unusable until the store is
 cleaned — a reload alone does not help, because the entry is re-adopted.
 
+The one that shipped came from the store: `load()` dropped an `env` entry only
+when its key read `undefined`, and a key emptied to `KEY=` reads `""`, which is
+not `undefined`. `adopt()` took it unguarded.
+
 Three doors lead into the map — `register()`, `maskOf()` and `adopt()` — and
-all three now check `MIN_SECRET_LEN`. `register()` always did; `maskOf()` is
-public and mints on the spot, so it was open until the tests went looking.
-It comes from the store: `load()` dropped an `env` entry only when its key was
-`undefined`, and a key emptied to `KEY=` reads `""`. Both ends now guard, and
-`adopt()` is the one that matters, because every store entry routes through it.
+all three now check `MIN_SECRET_LEN`, as does `load()` before it resolves
+anything. `register()` always did. `maskOf()` is public and mints on the spot,
+so it stayed open until the tests went looking for it.
 
 **The harness must run the shipped configuration.** `hook-check.ts` passed
 `{}` to `register()`, so every hook test ran with `options.ts`'s fallback
