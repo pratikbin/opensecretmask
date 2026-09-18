@@ -125,6 +125,18 @@ with `$.ui.log`, which the engine shows dim and never sends to the model. The
 command is declared from `session-start.ts` rather than its own hook, because
 `$.command.register` must be called in the file that declares the hook.
 
+**An empty secret is not useless, it is catastrophic.** `mask()` substitutes
+with `split`/`join`, and every string contains `""`, so one empty entry cuts
+between every character and rejoins them around the fake. A prompt becomes a
+wall of one token repeated per character, the engine skips `prompt.context`
+and `prompt.section` for size, and the session is unusable until the store is
+cleaned — a reload alone does not help, because the entry is re-adopted.
+
+It cannot come from `register()`, which has always checked `MIN_SECRET_LEN`.
+It comes from the store: `load()` dropped an `env` entry only when its key was
+`undefined`, and a key emptied to `KEY=` reads `""`. Both ends now guard, and
+`adopt()` is the one that matters, because every store entry routes through it.
+
 **`agentId` is camelCase.** The classic-hook spelling `agent_id` reads
 `undefined`.
 

@@ -132,7 +132,9 @@ export async function load(
     }
     const secret = parsed.get(entry.key)
     // The source moved on. Drop the entry instead of carrying a dead fake.
-    if (secret === undefined) continue
+    // `""` counts as moved on: a key emptied to `KEY=` is not `undefined`, and
+    // an empty secret poisons every later `mask()`.
+    if (!secret) continue
     resolved.push({ entry, secret })
   }
 

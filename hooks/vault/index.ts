@@ -96,7 +96,16 @@ export class Vault {
    * resolves is ignored, so a live mapping always beats a stored one.
    */
   adopt(fake: string, secret: string, source?: EnvSource, was?: Provenance): void {
-    if (this.#byMask.has(fake) || this.#bySecret.has(secret)) return
+    // An empty secret is catastrophic, not merely useless: `mask()` splits on
+    // it, so `"".split(secret)` cuts between every character and rejoins them
+    // around the fake. One such entry turned every prompt into a 40x wall of
+    // the same token and made the engine skip the prompt hooks for size.
+    //
+    // It arrives from the store, not from `register()`, which has always
+    // guarded: an `env` entry whose key still exists but now reads `KEY=`
+    // resolves to `""`, which is not `undefined`, so the old load kept it.
+    if (secret.length < MIN_SECRET_LEN) return
+    if (fake === '' || this.#byMask.has(fake) || this.#bySecret.has(secret)) return
     this.#remember(secret, fake)
     if (source) this.#envSource.set(secret, source)
     this.#note(

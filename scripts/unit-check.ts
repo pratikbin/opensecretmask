@@ -201,6 +201,17 @@ console.log(`rules: ${RULES.length}\n`)
   ok('FP capture keeps the surrounding syntax', masked.endsWith('",') && !masked.includes('a1b2c3d4'))
 }
 
+// EM an empty secret must never enter the map: mask() splits on it, so one
+// such entry rebuilds every string around the fake, character by character.
+{
+  const v = new Vault()
+  v.adopt('sk-ant-api03-zzzz', '')
+  ok('EM empty secret is refused', v.size === 0)
+  ok('EM text survives an attempted empty adopt', v.mask('hello world') === 'hello world')
+  v.adopt('', KEY)
+  ok('EM empty fake is refused', v.size === 0)
+}
+
 // round trip still works
 {
   const v = new Vault()
