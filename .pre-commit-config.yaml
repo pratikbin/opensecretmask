@@ -1,0 +1,28 @@
+# The checks that need no model and no network, run before every commit.
+#
+# The e2e scripts are deliberately absent: they cost real model calls and
+# minutes. Run `bash scripts/scenario-e2e.sh` by hand before a release.
+repos:
+  - repo: local
+    hooks:
+      - id: unit-check
+        name: unit checks
+        entry: bun run scripts/unit-check.ts
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: hook-check
+        name: hook checks
+        entry: bun run scripts/hook-check.ts
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # `--package` is required: the package's bin is `tsc`, not `typescript`.
+      - id: typecheck
+        name: typecheck
+        entry: npx --yes --package typescript@5 tsc -p tsconfig.json
+        language: system
+        pass_filenames: false
+        always_run: true
