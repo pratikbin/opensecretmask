@@ -57,7 +57,10 @@ rules, not a heuristic hidden elsewhere.
 `types/claude-code.d.ts` (13.1k lines) is the engine's own declaration file
 from `/plugin-types`, vendored so CI typechecks without a Claude Code install.
 Not our code. `.gitattributes` marks it `linguist-generated`. Refresh it when
-the engine API moves.
+the engine API moves. `/plugin-types` writes two sidecars beside it,
+`.keys` and `.names`: the event and export names as flat lists. Nothing reads
+them, they are cheap, and they diff readably when the API moves, which is the
+one thing the 13k-line declaration does not.
 
 ## Engine facts that shape the code
 
