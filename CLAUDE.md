@@ -137,6 +137,14 @@ It comes from the store: `load()` dropped an `env` entry only when its key was
 `undefined`, and a key emptied to `KEY=` reads `""`. Both ends now guard, and
 `adopt()` is the one that matters, because every store entry routes through it.
 
+**The harness must run the shipped configuration.** `hook-check.ts` passed
+`{}` to `register()`, so every hook test ran with `options.ts`'s fallback
+`persist: false` while the manifest ships `true`. The restore path therefore
+never executed under test, and the empty-secret bug — which arrives only
+through `load()` — could not be caught at the hook layer however many checks
+were added. `seat()` now defaults to the manifest's values. When a default
+moves in `plugin.json`, move it there too.
+
 **`agentId` is camelCase.** The classic-hook spelling `agent_id` reads
 `undefined`.
 
@@ -203,8 +211,8 @@ instead, because the engine rewrites the file.
 ## Build and test
 
 ```sh
-bun run scripts/unit-check.ts                          # 85 pure-logic checks
-bun run scripts/hook-check.ts                          # 21 hook-level checks
+bun run scripts/unit-check.ts                          # 103 pure-logic checks
+bun run scripts/hook-check.ts                          # 24 hook-level checks
 npx --yes --package typescript@5 tsc -p tsconfig.json  # NB: --package, see below
 bash scripts/local-e2e.sh                              # real model, 3 passes
 bash scripts/scenario-e2e.sh                           # 11 scenarios in tmux, 25 checks

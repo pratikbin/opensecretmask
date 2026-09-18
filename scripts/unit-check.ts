@@ -142,6 +142,68 @@ console.log(`rules: ${RULES.length}\n`)
   ok('P env never expires', prune(entries.map(e => ({...e, at: 0})), 120, Date.now()).length === 1)
 }
 
+// DS a degraded store. Everything below reached the vault through `load()`
+// once, and the empty case made every later mask() cut between every
+// character of every string. The happy-path round trip above cannot see any
+// of it, which is why the bug shipped with 85 checks green.
+{
+  const snap = (entries: unknown[]) => ({ version: 1, entries })
+  const portFor = (stored: unknown, files: Record<string, string> = {}) => ({
+    get: async () => stored,
+    set: async () => undefined,
+    readFile: async (p: string) => {
+      const text = files[p]
+      if (text === undefined) throw new Error('ENOENT')
+      return text
+    },
+  })
+  const envEntry = { kind: 'env', fake: 'sk-ant-api03-ffff', file: '/p/.env', key: 'TOKEN', at: Date.now() }
+
+  const drops = async (label: string, env: string | undefined) => {
+    const files = env === undefined ? {} : { '/p/.env': env }
+    const got = await load(portFor(snap([envEntry]), files), 120)
+    ok(`DS drops ${label}`, got.length === 0)
+  }
+  await drops('an emptied key', 'TOKEN=')
+  await drops('a key emptied with quotes', 'TOKEN=""')
+  await drops('a value under the minimum', 'TOKEN=abc')
+  await drops('a key that is gone', 'OTHER=hunter2-correct-horse')
+  await drops('a file that no longer reads', undefined)
+
+  const kept = await load(portFor(snap([envEntry]), { '/p/.env': 'TOKEN=hunter2-correct-horse' }), 120)
+  ok('DS keeps a key that still resolves', kept.length === 1)
+
+  // A store written by an older or broken writer, straight from JSON.
+  const literal = { kind: 'literal', fake: 'sk-ant-api03-gggg', secret: '', at: Date.now() }
+  const badLiteral = await load(portFor(snap([literal])), 120)
+  ok('DS an empty literal does not resolve', badLiteral.length === 0)
+  ok('DS an empty literal never survives adoption', (() => {
+    const v = new Vault()
+    for (const r of badLiteral) v.adopt(r.entry.fake, r.secret)
+    return v.size === 0 && v.mask('hello world') === 'hello world'
+  })())
+
+  for (const [label, raw] of [
+    ['a missing store', undefined],
+    ['a store of the wrong version', { version: 99, entries: [] }],
+    ['a store whose entries are not an array', { version: 1, entries: 'nope' }],
+    ['a store entry of the wrong shape', snap([{ kind: 'env', fake: 1 }])],
+    ['a store that throws on read', 'THROW'],
+  ] as [string, unknown][]) {
+    const port = raw === 'THROW'
+      ? { ...portFor(undefined), get: async () => { throw new Error('store gone') } }
+      : portFor(raw)
+    ok(`DS survives ${label}`, (await load(port, 120)).length === 0)
+  }
+
+  // The invariant the whole file exists to protect: whatever the store says,
+  // a vault built from it leaves ordinary text alone.
+  const v = new Vault()
+  for (const bad of ['', ' ', '\n', 'a', 'short']) v.adopt(`sk-ant-api03-${bad || 'x'}zz`, bad)
+  ok('DS no short or blank secret enters the map', v.size === 0)
+  ok('DS ordinary text is untouched by a poisoned store', v.mask('the quick brown fox') === 'the quick brown fox')
+}
+
 // budget: a hook that cannot mask denies instead of being skipped
 {
   ok('B sync throw falls back', guard(() => { throw new Error('x') }, () => 'DENIED') === 'DENIED')

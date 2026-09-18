@@ -23,21 +23,29 @@ const KEY = 'sk-ant-api03-' + 'A'.repeat(40)
 type Handler = ($: any, e: any, next: (e: any) => any) => any
 
 /** A loaded plugin: the hooks it registered, plus the `$` they are handed. */
-function seat() {
+// `options` defaults to the manifest's own defaults, not to `{}`. The module
+// fallback in options.ts reads `persist: false` while the shipped manifest
+// reads `true`, so a harness passing `{}` runs a configuration nobody has: the
+// restore path never executes, and a store that poisons every session at run
+// time looks perfectly healthy here.
+function seat(stored?: unknown, envFiles: Record<string, string> = {}, options: any = { persist: true }) {
   const hooks = new Map<string, Handler>()
   const logs: string[] = []
   const statuses: string[] = []
   // A fresh module keeps no drawn line, and neither should a fresh seat.
   resetStatus()
   const $ = {
-    fs: { exists: async () => false, read: async () => '' },
-    store: { get: async () => undefined, set: async () => undefined },
+    fs: {
+      exists: async (p: string) => p in envFiles,
+      read: async (p: string) => envFiles[p] ?? '',
+    },
+    store: { get: async () => stored, set: async () => undefined },
     ui: { log: (t: string) => logs.push(t), status: (t: string) => statuses.push(t) },
     clock: { sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)) },
     command: { register: async () => ({ command: 'osm-secrets' }) },
   }
   // `on` takes an optional matcher between the name and the handler.
-  register((name: string, a: any, b?: Handler) => hooks.set(name, b ?? a), {})
+  register((name: string, a: any, b?: Handler) => hooks.set(name, b ?? a), options)
   const fire = (name: string, e: any, world: (e: any) => any) => {
     const h = hooks.get(name)
     if (!h) throw new Error(`no handler for ${name}`)
@@ -158,6 +166,30 @@ ok('H all six hooks registered', (() => {
   ok('C command answers with no model-facing text', out.text === undefined)
   ok('C command logs the pairs', drawn.includes('real → fake') && drawn.includes('→'))
   ok('C command never logs the whole secret', !drawn.includes(KEY))
+}
+
+// A store carrying an entry that resolves to nothing must not reach the vault.
+// This is the shape that shipped: `.env` still had the key, the key had been
+// emptied, and every later mask() cut between every character of every string.
+{
+  const poisoned = {
+    version: 1,
+    entries: [
+      { kind: 'env', fake: 'sk-ant-api03-dead', file: '/work/.env', key: 'TOKEN', at: Date.now() },
+      { kind: 'literal', fake: 'sk-ant-api03-void', secret: '', at: Date.now() },
+    ],
+  }
+  const { fire, logs } = seat(poisoned, { '/work/.env': 'TOKEN=\nPORT=3000\n' })
+  await fire('session.start', { cwd: '/work', surface: 'terminal' }, (e: any) => e)
+  ok('E start line restores nothing from a poisoned store', !(logs[0] ?? '').includes('restored'))
+
+  const text = 'deploy the service and read the log'
+  const out: any = await fire('prompt.submit', { text, context: [] }, (e: any) => e)
+  ok('E a poisoned store leaves the prompt alone', out.text === text)
+
+  const up: any = await fire('tool.call', { tool: 'Bash', command: 'echo hi' },
+    () => ({ result: { stdout: 'hello world' }, text: 'hello world' }))
+  ok('E a poisoned store leaves a tool result alone', up.text === 'hello world')
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

@@ -19,7 +19,7 @@
 // On unless `persist` is turned off, because a map that dies with the plugin
 // load breaks every resume. Off, nothing is written at all.
 
-import { parseEnv } from '../env'
+import { MIN_SECRET_LEN, parseEnv } from '../env'
 
 /**
  * How a secret was first found, carried across sessions.
@@ -118,7 +118,9 @@ export async function load(
 
   for (const entry of entries) {
     if (entry.kind === 'literal') {
-      resolved.push({ entry, secret: entry.secret })
+      // Same minimum as an env entry: a store written by an older or broken
+      // writer can carry one, and the vault would refuse it anyway.
+      if (entry.secret.length >= MIN_SECRET_LEN) resolved.push({ entry, secret: entry.secret })
       continue
     }
     let parsed = files.get(entry.file)
@@ -132,9 +134,11 @@ export async function load(
     }
     const secret = parsed.get(entry.key)
     // The source moved on. Drop the entry instead of carrying a dead fake.
-    // `""` counts as moved on: a key emptied to `KEY=` is not `undefined`, and
-    // an empty secret poisons every later `mask()`.
-    if (!secret) continue
+    // Anything the vault would refuse counts as moved on: a key emptied to
+    // `KEY=` reads `""`, not `undefined`, and an empty secret poisons every
+    // later `mask()`. Resolving one the vault then drops would also inflate
+    // the restored count the start line prints.
+    if (secret === undefined || secret.length < MIN_SECRET_LEN) continue
     resolved.push({ entry, secret })
   }
 
