@@ -11,7 +11,7 @@ const CONSUMED =
   'osm: consumed. The delivery could not be masked, so it was not queued.'
 
 /**
- * The three prompt-side channels, all outbound.
+ * The five prompt-side channels, all outbound.
  *
  * `prompt.submit`   what the person typed, plus any context blocks attached.
  * `prompt.context`  the blocks on the first user message. `claudeMd` lives
@@ -47,13 +47,10 @@ export function registerPrompt(on: On, vault: Vault) {
 
   // A skill's own text, which `prompt.context` never sees.
   on('skill.prompt', ($, e, next) => {
-    const text = guard(
-      () => vault.mask(e.text, `skill:${e.skill}`),
-      () => undefined,
-    )
     // No drop on this channel: the engine's answer is a prompt, so refusing
     // means handing back the empty one rather than the unmasked one.
-    return next({ ...e, text: text ?? '' })
+    const text = guard(() => vault.mask(e.text, `skill:${e.skill}`), () => '')
+    return next({ ...e, text })
   })
 
   // Queued, transcribed and read by the model, all without `prompt.submit`.

@@ -218,6 +218,14 @@ ok('H all nine hooks registered', (() => {
   // A rewritten message must give its handle up, or the engine stands its own
   // copy — the unmasked one — in place of ours.
   ok('C compaction drops the handle of a masked message', done.messages[1].handle === undefined)
+  ok('C compaction keeps the role of a masked message', done.messages[1].role === 'assistant')
+  // The message is masked whole rather than field by field, so a content field
+  // the engine adds later is covered without anyone updating a list.
+  ok('C compaction masks a field no list names', await (async () => {
+    const odd = [{ role: 'user', text: '', toolUses: [], future: `see ${KEY}`, handle: 'h4' }]
+    const out: any = await fire('session.compact', { trigger: 'manual', messages: odd }, (e: any) => e)
+    return !JSON.stringify(out.messages).includes(KEY)
+  })())
   ok('C compaction masks a tool result inside a message', await (async () => {
     const deep = [{ role: 'assistant', text: '', toolUses: [{ name: 'Bash', result: { stdout: KEY } }], handle: 'h3' }]
     const out: any = await fire('session.compact', { trigger: 'auto', messages: deep }, (e: any) => e)

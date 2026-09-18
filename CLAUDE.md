@@ -244,7 +244,7 @@ instead, because the engine rewrites the file.
 
 ```sh
 bun run scripts/unit-check.ts                          # 117 pure-logic checks
-bun run scripts/hook-check.ts                          # 33 hook-level checks
+bun run scripts/hook-check.ts                          # 35 hook-level checks
 bun run scripts/corpus-check.ts                        # our rules vs upstream fixtures
 bun run scripts/fetch-corpus.ts                        # refresh corpus/, needs network
 npx --yes --package typescript@5 tsc -p tsconfig.json  # NB: --package, see below

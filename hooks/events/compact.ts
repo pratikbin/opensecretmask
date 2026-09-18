@@ -32,16 +32,21 @@ export function registerCompact(on: On, vault: Vault) {
   })
 }
 
+/**
+ * Masks everything in a message except the two fields the engine reads as
+ * structure.
+ *
+ * Masking what is left rather than naming the content fields: `walk` never
+ * skips by key, and CLAUDE.md records what deciding by key name cost last
+ * time. A content field added upstream is covered here by default instead of
+ * reaching the summarizer because nobody updated a list.
+ *
+ * `walk` returns the original identity when no leaf moved, which is the same
+ * signal `boundary.ts` uses to tell a rewrite from a pass-through.
+ */
 function scrub(message: SessionMessage, vault: Vault): SessionMessage {
-  const where = 'compact'
-  const next: SessionMessage = {
-    ...message,
-    text: vault.mask(message.text, where),
-    toolUses: vault.maskDeep(message.toolUses, where),
-    ...(message.toolResults ? { toolResults: vault.maskDeep(message.toolResults, where) } : {}),
-  }
-  // `handle` is an opaque engine token. It is never masked, and it is only
-  // surrendered when something under it moved.
-  if (JSON.stringify(next) === JSON.stringify(message)) return message
-  return { ...next, handle: undefined }
+  const { handle, role, ...rest } = message
+  const masked = vault.maskDeep(rest, 'compact')
+  if (masked === rest) return message
+  return { role, ...masked, handle: undefined }
 }
