@@ -436,6 +436,14 @@ OpenRouter, and `scripts/sandbox-scenarios.sh` runs the whole matrix there. The
 box-side wrapper installs tmux and jq, upgrades Claude Code to a version that
 has function hooks, and repoints the model at OpenRouter:
 
+`scripts/wire-e2e.sh` answers a question none of the others can: not "did the
+hook return a fake" but "what actually left the machine". It puts a recording
+proxy in `ANTHROPIC_BASE_URL`, plants a canary credential, and reads the
+request bodies Claude Code sent. The canary must appear in none of them, a
+same-shaped fake in one, and a control run without the plugin must leak the
+canary — otherwise the run proves nothing. Request bodies are recorded;
+headers never are, because they carry the caller's own token.
+
 ```sh
 export OPENROUTER_API_KEY=…            # in your own shell, never in a prompt
 cos offload -s s-2vcpu-4gb -v OPENROUTER_API_KEY -o matrix.log . \

@@ -254,6 +254,7 @@ npx --yes --package typescript@5 tsc -p tsconfig.json  # NB: --package, see belo
 bash scripts/local-e2e.sh                              # real model, 3 passes
 bash scripts/scenario-e2e.sh                           # 11 scenarios in tmux, 25 checks
 bash scripts/sandbox-e2e.sh                            # real model, throwaway box
+bash scripts/wire-e2e.sh                               # what actually left the machine
 ```
 
 `npx typescript@5 tsc` fails with "could not determine executable to run" — the
@@ -268,6 +269,27 @@ engine skipped the hook and served the real result. `validate` and `noload`
 need no model and catch the failure with no symptom, where the module is
 rejected, no hook loads, and every other scenario quietly reports the
 control's answer.
+
+**In-process checks cannot answer "did it leave masked".** 129 unit checks and
+35 hook checks all assert that our hook *returned* a fake. None can show the
+engine *sent* one — a skipped hook fails open and a returned `ref` makes core
+serve the messages it already built, and both look fine from inside. The only
+ground truth is the request body, which `scripts/wire-e2e.sh` reads by putting
+`scripts/wire-recorder.ts` in `ANTHROPIC_BASE_URL`. No CA and no TLS
+interception: the engine already honours that variable, which is how the
+sandbox scripts reach OpenRouter.
+
+It asserts three things, and the third is what makes the other two mean
+anything: the canary appears in no request body, a same-shaped fake appears in
+one, and a control run with no plugin *does* leak the canary. Without the
+control, a model that never read the file scores identically to a model that
+read a fake.
+
+Two traps it already walked into. The shape assertion first demanded a literal
+`api03`, which a healthy mask fails: `garble` preserves character classes, not
+text. And the runner printed the model's answer, so the canary came back
+through the caller's tool result and was registered in the host store the
+sandbox existed to protect — output is a channel too.
 
 ### e2e traps
 
