@@ -2,5 +2,3 @@
 # without a Claude Code install. Not our code: excluded from language stats
 # and collapsed in diffs.
 types/claude-code.d.ts linguist-generated=true -diff
-types/claude-code.d.ts.keys linguist-generated=true -diff
-types/claude-code.d.ts.names linguist-generated=true -diff

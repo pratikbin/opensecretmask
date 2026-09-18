@@ -54,13 +54,12 @@ whole value and need no exclusions, but eight match a context and take
 whatever follows, and what that wildcard must refuse is a property of the
 rules, not a heuristic hidden elsewhere.
 
-`types/claude-code.d.ts` (13.1k lines) is the engine's own declaration file
+`types/claude-code.d.ts` (14.6k lines) is the engine's own declaration file
 from `/plugin-types`, vendored so CI typechecks without a Claude Code install.
 Not our code. `.gitattributes` marks it `linguist-generated`. Refresh it when
-the engine API moves. `/plugin-types` writes two sidecars beside it,
-`.keys` and `.names`: the event and export names as flat lists. Nothing reads
-them, they are cheap, and they diff readably when the API moves, which is the
-one thing the 13k-line declaration does not.
+the engine API moves: run `/plugin-types` and copy `.claude/types/claude-code.d.ts`
+over it. Earlier engine versions also wrote `.keys` and `.names` sidecars beside
+it; 2026-09-18's does not, so they are gone rather than left to rot.
 
 ## Engine facts that shape the code
 
