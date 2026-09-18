@@ -6,6 +6,11 @@
 //
 // Shapes and prefixes adapted from ray-amjad/awesome-claude-code-function-hooks
 // (MIT, Copyright (c) 2026 Ray Amjad).
+//
+// What a CAPTURE-GROUP rule must refuse is declared in `rules/deny.ts`, not
+// here: that is a property of the rules, and it belongs where they are.
+
+import { denyRules, type Deny } from './rules/deny'
 
 /**
  * Prefixes that name a PUBLIC object id, not a key.
@@ -41,22 +46,6 @@ function isCodeName(token: string): boolean {
   return words.every((w) => /^[A-Za-z]+$/.test(w) && w.length <= 14)
 }
 
-/** A value that names a secret instead of being one: `$KEY`, `${KEY}`, `%KEY%`. */
-const REFERENCE = /^(?:\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%|<[^>]*>|\{\{[^}]*\}\}|\[[^\]]*\])$/
-
-/**
- * A word standing in for a credential in documentation.
- *
- * Two patterns, not one with `i`: a case-insensitive `[A-Z]` class matches any
- * letter, which suppressed every lowercase bearer token in the suite.
- */
-const SHOUTED = /^(?:[A-Z][A-Z_-]{2,}|x{3,}|\*{3,}|\.{3,})$/
-const NAMED_PLACEHOLDER =
-  /^(?:changeme|your[_-]?\w*|example\w*|redacted|dummy|placeholder|sample)$/i
-
-/** Regex syntax, which arrives whenever a rule file or a pattern is read aloud. */
-const REGEX_SYNTAX = /\\[bdswBDSW]|\[\^|\(\?:|\{\d+,\d*\}|\\\//
-
 /**
  * Whether a capture-group rule's value is not a credential at all.
  *
@@ -65,16 +54,15 @@ const REGEX_SYNTAX = /\\[bdswBDSW]|\[\^|\(\?:|\{\d+,\d*\}|\\\//
  * that is as often a variable reference, a documentation placeholder or — when
  * the file being read is this repository — the rule's own regex source.
  *
- * Deliberately not here: plain hex and digit runs. Under an explicit
- * `API_KEY=` the name is the evidence, and a 32-hex value there is usually the
- * real thing.
+ * The shapes themselves live in `rules/deny.ts`, beside the rules they answer.
  */
 export function isPlaceholder(value: string): boolean {
-  if (REFERENCE.test(value)) return true
-  if (SHOUTED.test(value) || NAMED_PLACEHOLDER.test(value)) return true
-  if (REGEX_SYNTAX.test(value)) return true
-  if (UUID.test(value)) return true
-  return false
+  return denyRules.some((d) => d.re.test(value))
+}
+
+/** The deny rule that refused `value`, for a message that can name a reason. */
+export function denialOf(value: string): Deny | undefined {
+  return denyRules.find((d) => d.re.test(value))
 }
 
 /** A captured value's edges, where the surrounding syntax ends up. */

@@ -35,8 +35,9 @@ Everything else in this codebase is negotiable. That is not.
 | `hooks/detect/index.ts` | The scanner |
 | `hooks/detect/prefix.ts` | Literal-prefix extraction |
 | `hooks/detect/entropy.ts` | Shannon layer |
-| `hooks/detect/suppress.ts` | False-positive suppression, entropy and capture groups |
+| `hooks/detect/suppress.ts` | Entropy scoring; capture-group shapes live in `rules/deny.ts` |
 | `hooks/detect/rules/*.ts` | 146 patterns in six groups |
+| `hooks/detect/rules/deny.ts` | What a capture-group rule must refuse |
 | `hooks/policy/boundary.ts` | `outbound`/`inbound`, where `ref` is stripped |
 | `hooks/policy/model-facing.ts` | Arguments that must keep their fakes |
 | `hooks/policy/budget.ts` | Failure fallbacks |
@@ -45,7 +46,11 @@ Everything else in this codebase is negotiable. That is not.
 | `CONTRIBUTING.md` | How to add a rule. Update its counts when `RULES` grows |
 
 Adding a rule source is one file in `rules/` plus one line in `rules/index.ts`.
-No registry, no init-time side effects.
+No registry, no init-time side effects. Excluding a shape is one line in
+`rules/deny.ts`, which is the same directory on purpose: 138 rules match a
+whole value and need no exclusions, but eight match a context and take
+whatever follows, and what that wildcard must refuse is a property of the
+rules, not a heuristic hidden elsewhere.
 
 `types/claude-code.d.ts` (13.1k lines) is the engine's own declaration file
 from `/plugin-types`, vendored so CI typechecks without a Claude Code install.
@@ -215,7 +220,7 @@ instead, because the engine rewrites the file.
 ## Build and test
 
 ```sh
-bun run scripts/unit-check.ts                          # 111 pure-logic checks
+bun run scripts/unit-check.ts                          # 117 pure-logic checks
 bun run scripts/hook-check.ts                          # 24 hook-level checks
 npx --yes --package typescript@5 tsc -p tsconfig.json  # NB: --package, see below
 bash scripts/local-e2e.sh                              # real model, 3 passes

@@ -10,6 +10,8 @@ const { Vault } = await import(`${R}/vault/index.ts`)
 const { scan, RULES } = await import(`${R}/detect/index.ts`)
 const { parseEnv, parseValue } = await import(`${R}/env.ts`)
 const { isModelFacing, RESERVED } = await import(`${R}/policy/model-facing.ts`)
+const { denyRules } = await import(`${R}/detect/rules/deny.ts`)
+const { isPlaceholder, denialOf } = await import(`${R}/detect/suppress.ts`)
 const { inbound, outbound } = await import(`${R}/policy/boundary.ts`)
 const { isOpaque } = await import(`${R}/vault/walk.ts`)
 const { load, save, prune } = await import(`${R}/vault/persist.ts`)
@@ -287,6 +289,18 @@ console.log(`rules: ${RULES.length}\n`)
   ok('EM masking an empty string is an empty string', t.mask('') === '')
   ok('EM unmasking an empty string is an empty string', t.unmask('') === '')
   ok('EM an empty string inside a tree is untouched', JSON.stringify(t.maskDeep({ a: '', b: [''] })) === '{"a":"","b":[""]}')
+}
+
+// DY the deny rules: declared beside the rules they answer, same as a rule.
+{
+  ok('DY every deny rule carries a reason', denyRules.every((d: any) => d.why.length > 0))
+  // `test()` on a global regex carries lastIndex between calls and starts
+  // skipping matches, which would let a placeholder through every other time.
+  ok('DY no deny rule is global', denyRules.every((d: any) => !d.re.flags.includes('g')))
+  ok('DY a deny rule names itself', denialOf('${DB_PASSWORD}')?.name === 'Variable reference')
+  ok('DY a uuid is denied as an identifier', denialOf('550e8400-e29b-41d4-a716-446655440000')?.name === 'UUID')
+  ok('DY a real value is denied by nothing', denialOf('hunter2-correct-horse') === undefined)
+  ok('DY hex under a name is still a candidate', !isPlaceholder('a1b2c3d4'.repeat(4)))
 }
 
 // round trip still works
