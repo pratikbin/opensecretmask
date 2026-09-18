@@ -37,12 +37,14 @@ Everything else in this codebase is negotiable. That is not.
 | `hooks/detect/entropy.ts` | Shannon layer |
 | `hooks/detect/suppress.ts` | Entropy scoring; capture-group shapes live in `rules/deny.ts` |
 | `hooks/detect/rules/*.ts` | 146 patterns in six groups |
-| `hooks/detect/rules/deny.ts` | What a capture-group rule must refuse |
 | `hooks/policy/boundary.ts` | `outbound`/`inbound`, where `ref` is stripped |
 | `hooks/policy/model-facing.ts` | Arguments that must keep their fakes |
 | `hooks/policy/budget.ts` | Failure fallbacks |
 | `hooks/status.ts` | The start line and the pinned line, both pure |
 | `.claude-plugin/marketplace.json` | The install source for `claude plugin install osm@opensecretmask` |
+| `hooks/detect/rules/deny.ts` | What a capture-group rule must refuse |
+| `corpus/corpus.json` | Upstream fixtures. Generated; see `THIRD-PARTY.md` |
+| `corpus/baseline.json` | What we catch and where we knowingly differ |
 | `CONTRIBUTING.md` | How to add a rule. Update its counts when `RULES` grows |
 
 Adding a rule source is one file in `rules/` plus one line in `rules/index.ts`.
@@ -222,6 +224,8 @@ instead, because the engine rewrites the file.
 ```sh
 bun run scripts/unit-check.ts                          # 117 pure-logic checks
 bun run scripts/hook-check.ts                          # 24 hook-level checks
+bun run scripts/corpus-check.ts                        # our rules vs upstream fixtures
+bun run scripts/fetch-corpus.ts                        # refresh corpus/, needs network
 npx --yes --package typescript@5 tsc -p tsconfig.json  # NB: --package, see below
 bash scripts/local-e2e.sh                              # real model, 3 passes
 bash scripts/scenario-e2e.sh                           # 11 scenarios in tmux, 25 checks

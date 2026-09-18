@@ -407,6 +407,7 @@ a timer: synchronous work cannot overrun a deadline it blocks.
 ```sh
 bun run scripts/unit-check.ts   # 117 checks on the pure logic
 bun run scripts/hook-check.ts   # 24 checks on the hooks, through a fake engine
+bun run scripts/corpus-check.ts # our rules against gitleaks, Nosey Parker and secretlint fixtures
 npx --yes --package typescript@5 tsc -p tsconfig.json
 claude plugin validate .claude-plugin/plugin.json   # the engine must accept the hooks
 ```

@@ -19,6 +19,15 @@ repos:
         pass_filenames: false
         always_run: true
 
+      # Upstream fixtures, committed. `scripts/fetch-corpus.ts` refreshes them
+      # and needs the network; this only reads the result.
+      - id: corpus-check
+        name: upstream corpus
+        entry: bun run scripts/corpus-check.ts
+        language: system
+        pass_filenames: false
+        always_run: true
+
       # `--package` is required: the package's bin is `tsc`, not `typescript`.
       - id: typecheck
         name: typecheck
