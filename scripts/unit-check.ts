@@ -299,6 +299,15 @@ console.log(`rules: ${RULES.length}\n`)
   ok('DY no deny rule is global', denyRules.every((d: any) => !d.re.flags.includes('g')))
   ok('DY a deny rule names itself', denialOf('${DB_PASSWORD}')?.name === 'Variable reference')
   ok('DY a uuid is denied as an identifier', denialOf('550e8400-e29b-41d4-a716-446655440000')?.name === 'UUID')
+  ok('DY a secret reference is denied as a locator',
+    denialOf('op://my-vault/db/password')?.name === 'Secret reference')
+  ok('DY a plain url under a credential name is denied',
+    denialOf('https://example.com/a/b')?.name === 'Secret reference')
+  // A DSN carrying its password inline is NOT a locator. `Connection String
+  // Password` masks that group by itself, and denying the whole value here
+  // would put the password back in the clear.
+  ok('DY a dsn with inline credentials is not denied',
+    denialOf('postgres://user:Xk29fmQpLz@host/db') === undefined)
   ok('DY a real value is denied by nothing', denialOf('hunter2-correct-horse') === undefined)
   ok('DY hex under a name is still a candidate', !isPlaceholder('a1b2c3d4'.repeat(4)))
 }

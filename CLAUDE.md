@@ -128,8 +128,9 @@ about itself.
 **A capture group is not evidence; a prefix is.** `sk-ant-…` is a key by
 construction, but a context-bearing rule takes whatever sits right of
 `PASSWORD=`, and the session store showed what that collects: `${DB_PASSWORD}`,
-`[MASKED-0001]`, the literal word PASSWORD out of a documented DSN, a UUID, and
-this repository's own rule source read back as a value. Only `group > 0`
+`[MASKED-0001]`, the literal word PASSWORD out of a documented DSN, a UUID,
+a 1Password `op://` reference read off a documentation page, and this
+repository's own rule source read back as a value. Only `group > 0`
 matches run through `trimCapture` and `isPlaceholder`, and both the raw and the
 trimmed form are tested, because trimming removes the very brackets that make a
 reference recognisable. Plain hex and digit runs are deliberately NOT
@@ -243,7 +244,7 @@ instead, because the engine rewrites the file.
 ## Build and test
 
 ```sh
-bun run scripts/unit-check.ts                          # 117 pure-logic checks
+bun run scripts/unit-check.ts                          # 120 pure-logic checks
 bun run scripts/hook-check.ts                          # 35 hook-level checks
 bun run scripts/corpus-check.ts                        # our rules vs upstream fixtures
 bun run scripts/fetch-corpus.ts                        # refresh corpus/, needs network
@@ -293,14 +294,11 @@ Five things make a runner look broken when it is not.
 - A classic hook downstream of us receives the restored value, and the engine
   writes its stdout verbatim into the transcript JSONL. Observed with a
   `PreToolUse` rewriter. Nothing the plugin can do from inside.
-- `env.ts:46` and `builtin.ts:102` carry a garble where `PASSWORD` belongs, so
-  neither the name test nor the `Environment Variable Secret` rule fires on
-  `DB_PASSWORD=` and its siblings. A value with no vendor shape behind such a
-  name is not masked at all. The same garble is in README and in every e2e
-  fixture's variable name, which is why the suite is green. Fixing it means
-  editing the two regexes, the docs, and the fixtures together, and dropping
-  the stale entry from the store first — otherwise the word is masked again on
-  the way in and the edit does not say what it reads.
+- A developer's store fills with values this repository's own test runs
+  produced: scenario fixtures, corpus strings, and any credential-shaped
+  literal that passed through a tool result. They keep being masked in
+  unrelated sessions. There is no reaper and no purge command; see the e2e
+  traps above.
 
 ## Attribution
 

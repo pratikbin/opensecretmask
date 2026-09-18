@@ -54,6 +54,15 @@ export const denyRules: readonly Deny[] = [
     /\\[bdswBDSW]|\[\^|\(\?:|\{\d+,\d*\}|\\\//,
     'a pattern, which arrives whenever a rule file is read aloud',
   ),
+  // `op://vault/item/field`, `vault://…`, `https://…`: a locator for the
+  // credential, not the credential. A DSN that carries one inline has an `@`
+  // before the host, and `Connection String Password` masks that group on its
+  // own, so requiring no `@` anywhere keeps the two apart.
+  deny(
+    'Secret reference',
+    /^[a-z][a-z0-9+.-]{1,20}:\/\/[^\s@]*$/i,
+    'points at where the secret lives: op://vault/item/field',
+  ),
   deny(
     'UUID',
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
