@@ -15,6 +15,7 @@ const { isPlaceholder, denialOf } = await import(`${R}/detect/suppress.ts`)
 const { inbound, outbound } = await import(`${R}/policy/boundary.ts`)
 const { isOpaque } = await import(`${R}/vault/walk.ts`)
 const { load, save, prune } = await import(`${R}/vault/persist.ts`)
+const { readOptions } = await import(`${R}/options.ts`)
 const { guard } = await import(`${R}/policy/budget.ts`)
 const { elide, secretsTable } = await import(`${R}/events/command.ts`)
 
@@ -115,6 +116,30 @@ console.log(`rules: ${RULES.length}\n`)
   for (let i = 0; i < 40; i++) deep = { n: deep }
   const v = new Vault()
   ok('WALK deep object does not blow the stack', typeof v.maskDeep(deep) === 'object')
+}
+
+// OPT the module's fallbacks must be the manifest's declared defaults. The
+// engine fills a declared option before register() sees it, so these only fire
+// where the manifest does not reach — a --plugin-dir run, this harness. When
+// the two disagreed, every hook test ran a configuration nobody ships.
+{
+  const manifest = await Bun.file(
+    new URL('../.claude-plugin/plugin.json', import.meta.url).pathname,
+  ).json()
+  const declared: Record<string, any> = {}
+  for (const [name, spec] of Object.entries<any>(manifest.userConfig ?? {})) declared[name] = spec.default
+  const fallback: any = readOptions({} as any)
+  ok('OPT persist is on without a manifest', fallback.persist === true)
+  ok('OPT persist matches what the manifest declares', declared.persist === fallback.persist)
+  ok('OPT retentionDays matches the manifest', declared.retentionDays === fallback.retentionDays)
+  ok('OPT entropy matches the manifest', declared.entropy === fallback.detect.entropy)
+  ok('OPT entropyThreshold matches the manifest', declared.entropyThreshold === fallback.detect.entropyThreshold)
+  ok('OPT entropyMinLen matches the manifest', declared.entropyMinLen === fallback.detect.entropyMinLen)
+  ok('OPT envFiles matches the manifest',
+    JSON.stringify(declared.envFiles) === JSON.stringify(fallback.envFiles))
+  // An explicit false must still turn it off, in either spelling.
+  ok('OPT persist false is honoured', readOptions({ persist: false } as any).persist === false)
+  ok('OPT persist "false" is honoured', readOptions({ persist: 'false' } as any).persist === false)
 }
 
 // persistence round trip: env ref carries no secret

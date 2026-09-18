@@ -23,12 +23,12 @@ const KEY = 'sk-ant-api03-' + 'A'.repeat(40)
 type Handler = ($: any, e: any, next: (e: any) => any) => any
 
 /** A loaded plugin: the hooks it registered, plus the `$` they are handed. */
-// `options` defaults to the manifest's own defaults, not to `{}`. The module
-// fallback in options.ts reads `persist: false` while the shipped manifest
-// reads `true`, so a harness passing `{}` runs a configuration nobody has: the
-// restore path never executes, and a store that poisons every session at run
-// time looks perfectly healthy here.
-function seat(stored?: unknown, envFiles: Record<string, string> = {}, options: any = { persist: true }) {
+// `{}` is the shipped configuration: options.ts now falls back to exactly what
+// the manifest declares, and scripts/unit-check.ts asserts the two agree. It
+// did not always. While they disagreed a harness passing `{}` ran with
+// `persist: false`, the restore path never executed, and a store that poisoned
+// every session at run time looked perfectly healthy here.
+function seat(stored?: unknown, envFiles: Record<string, string> = {}, options: any = {}) {
   const hooks = new Map<string, Handler>()
   const logs: string[] = []
   const statuses: string[] = []

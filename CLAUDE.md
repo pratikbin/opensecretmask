@@ -118,12 +118,14 @@ reason. Adding an option means adding it in two places: `hooks/options.ts` and
 `userConfig`.
 
 **A `userConfig` default beats the module's own fallback.** The engine fills a
-declared option from the manifest before `register()` sees it, so the `??` in
-`options.ts` only ever fires for an option the manifest does not declare. The
-two disagree today: `persist` reads `false` in `options.ts` and `true` in the
-manifest, and the manifest wins — a machine with no `pluginConfigs.osm` entry
-still has a populated store. Change a default in one place and the code lies
-about itself.
+declared option from the manifest before `register()` sees it, so the fallback
+in `options.ts` only fires where the manifest does not reach: a `--plugin-dir`
+run, a test harness. The two disagreed for months — `persist` read `false` in
+`options.ts` and `true` in the manifest — which meant the code behaved one way
+in development and another in production, and said the wrong thing when read.
+They now agree, and `unit-check.ts`'s `OPT` block asserts every declared
+default against its fallback, so the next divergence fails a check instead of
+becoming folklore.
 
 **A capture group is not evidence; a prefix is.** `sk-ant-…` is a key by
 construction, but a context-bearing rule takes whatever sits right of
@@ -170,12 +172,12 @@ anything. `register()` always did. `maskOf()` is public and mints on the spot,
 so it stayed open until the tests went looking for it.
 
 **The harness must run the shipped configuration.** `hook-check.ts` passed
-`{}` to `register()`, so every hook test ran with `options.ts`'s fallback
-`persist: false` while the manifest ships `true`. The restore path therefore
+`{}` to `register()`, which while the defaults disagreed meant every hook test
+ran with `persist: false` against a manifest shipping `true`. The restore path
 never executed under test, and the empty-secret bug — which arrives only
 through `load()` — could not be caught at the hook layer however many checks
-were added. `seat()` now defaults to the manifest's values. When a default
-moves in `plugin.json`, move it there too.
+were added. Now that `options.ts` mirrors the manifest, `{}` *is* the shipped
+configuration and `seat()` passes it.
 
 **`agentId` is camelCase.** The classic-hook spelling `agent_id` reads
 `undefined`.
@@ -243,7 +245,7 @@ instead, because the engine rewrites the file.
 ## Build and test
 
 ```sh
-bun run scripts/unit-check.ts                          # 117 pure-logic checks
+bun run scripts/unit-check.ts                          # 126 pure-logic checks
 bun run scripts/hook-check.ts                          # 35 hook-level checks
 bun run scripts/corpus-check.ts                        # our rules vs upstream fixtures
 bun run scripts/fetch-corpus.ts                        # refresh corpus/, needs network

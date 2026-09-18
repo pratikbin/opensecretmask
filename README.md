@@ -219,14 +219,18 @@ Set an option with `/config` inside Claude Code, or write it into
 The values above are the defaults. The plugin key is `osm`, or `osm@inline`
 when you load it with `--plugin-dir`.
 
-| Option | What it does |
-| --- | --- |
-| `entropy` | Adds a Shannon-entropy layer for tokens that no pattern matches |
-| `entropyThreshold` | Bits per character above which a string counts as random |
-| `entropyMinLen` | Shortest string the entropy layer will consider |
-| `envFiles` | Which files the exact-match layer reads at session start |
-| `persist` | Carries the map across a resume, a fork or `/reload-plugins` |
-| `retentionDays` | How long a stored literal secret survives |
+| Option | Default | What it does |
+| --- | --- | --- |
+| `entropy` | `false` | Adds a Shannon-entropy layer for tokens that no pattern matches |
+| `entropyThreshold` | `4` | Bits per character above which a string counts as random |
+| `entropyMinLen` | `24` | Shortest string the entropy layer will consider |
+| `envFiles` | `.env`, `.env.local` | Which files the exact-match layer reads at session start |
+| `persist` | `true` | Carries the map across a resume, a fork or `/reload-plugins` |
+| `retentionDays` | `120` | How long a stored literal secret survives |
+
+Those defaults are declared in `.claude-plugin/plugin.json` and mirrored in
+`hooks/options.ts`; a check asserts the two agree, because for a while they did
+not and `persist` behaved one way in development and another once installed.
 
 `entropy` catches vendors that have no rule, such as an Atlassian token or an
 Azure storage key. It costs precision: it will mask a long random-looking path
@@ -408,7 +412,7 @@ a timer: synchronous work cannot overrun a deadline it blocks.
 ## Tests
 
 ```sh
-bun run scripts/unit-check.ts   # 117 checks on the pure logic
+bun run scripts/unit-check.ts   # 126 checks on the pure logic
 bun run scripts/hook-check.ts   # 35 checks on the hooks, through a fake engine
 bun run scripts/corpus-check.ts # our rules against gitleaks, Nosey Parker and secretlint fixtures
 npx --yes --package typescript@5 tsc -p tsconfig.json
@@ -455,7 +459,7 @@ hooks/
     index.ts           the two-way map
     garble.ts          the format-preserving fake
     walk.ts            bounded traversal, opaque-payload aware
-    persist.ts         $.store backing, opt-in
+    persist.ts         $.store backing, on by default
   detect/
     index.ts           the scanner
     prefix.ts          literal-prefix extraction
