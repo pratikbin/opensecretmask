@@ -14,7 +14,7 @@ const { denyRules } = await import(`${R}/detect/rules/deny.ts`)
 const { isPlaceholder, denialOf } = await import(`${R}/detect/suppress.ts`)
 const { inbound, outbound } = await import(`${R}/policy/boundary.ts`)
 const { isOpaque } = await import(`${R}/vault/walk.ts`)
-const { load, save, prune } = await import(`${R}/vault/persist.ts`)
+const { load, save, prune, identityKey, resetKnownStore } = await import(`${R}/vault/persist.ts`)
 const { readOptions } = await import(`${R}/options.ts`)
 const { guard } = await import(`${R}/policy/budget.ts`)
 const { elide, secretsTable } = await import(`${R}/events/command.ts`)
@@ -167,6 +167,94 @@ console.log(`rules: ${RULES.length}\n`)
   ok('P literal entry stores value', JSON.stringify(lit).includes(KEY))
   ok('P literal expires past window', prune(lit, 120, Date.now()).length === 0)
   ok('P env never expires', prune(entries.map(e => ({...e, at: 0})), 120, Date.now()).length === 1)
+}
+
+// RC reconciling a save against the store, not overwriting it. Two sessions
+// share one store file, and a session's own snapshot only grows — so a save
+// that just writes "everything I hold" resurrects anything a concurrent
+// session purged since this one loaded. That happened twice in one day.
+{
+  const literal = (secret: string, fake: string) =>
+    ({ kind: 'literal' as const, fake, secret, at: Date.now() })
+  const snap = (entries: unknown[]) => ({ version: 1, entries })
+  const portOver = (initial: unknown) => {
+    let stored = initial
+    return {
+      get: async () => stored,
+      set: async (_k: string, v: unknown) => { stored = v },
+      readFile: async () => '',
+      peek: () => stored as { entries: any[] } | undefined,
+    }
+  }
+
+  ok('RC identityKey ignores the fake', (() => {
+    const a = literal('hunter2-correct-horse-one', 'sk-ant-api03-aaaa')
+    const b = { ...a, fake: 'sk-ant-api03-bbbb' }
+    return identityKey(a) === identityKey(b)
+  })())
+  ok('RC identityKey separates env by file and key, not by value', (() => {
+    const a = { kind: 'env' as const, fake: 'x', file: '/p/.env', key: 'A', at: 0 }
+    const b = { ...a, key: 'B' }
+    return identityKey(a) !== identityKey(b)
+  })())
+
+  {
+    // A purge on disk must survive this session's next save, even though this
+    // session's own vault never learned the entry was gone.
+    const gone = literal('hunter2-correct-horse-gone', 'sk-ant-api03-gggg')
+    const port = portOver(snap([gone]))
+    resetKnownStore()
+    await load(port, 120) // seeds `known` with `gone`'s identity
+    port.set('', snap([])) // another session purges it, out from under this one
+    await save(port, [gone]) // this session still holds it; save() must not restore it
+    ok('RC a purge is not resurrected by a stale save', port.peek()!.entries.length === 0)
+  }
+
+  {
+    // A genuinely new entry, never seen on disk or by this session before,
+    // must still be added — reconciling is not a synonym for "never write".
+    const known = literal('hunter2-correct-horse-known', 'sk-ant-api03-kkkk')
+    const fresh = literal('hunter2-correct-horse-fresh', 'sk-ant-api03-ffff')
+    const port = portOver(snap([known]))
+    resetKnownStore()
+    await load(port, 120)
+    await save(port, [known, fresh])
+    const secrets = port.peek()!.entries.map((e: any) => e.secret)
+    ok('RC a genuinely new entry is added', secrets.includes('hunter2-correct-horse-fresh'))
+  }
+
+  {
+    // A concurrent session's own new entry, which this session never adopted,
+    // must not be dropped just because this session's own snapshot omits it.
+    const mine = literal('hunter2-correct-horse-mine', 'sk-ant-api03-mmmm')
+    const theirs = literal('hunter2-correct-horse-theirs', 'sk-ant-api03-tttt')
+    const port = portOver(snap([mine]))
+    resetKnownStore()
+    await load(port, 120)
+    port.set('', snap([mine, theirs])) // the other session adds its own entry
+    await save(port, [mine]) // this session never saw `theirs`
+    const secrets = port.peek()!.entries.map((e: any) => e.secret)
+    ok('RC a concurrent addition is not clobbered', secrets.includes('hunter2-correct-horse-theirs'))
+  }
+
+  {
+    // A read failure must skip the save outright, not read as "disk was
+    // empty" — that would silently erase every entry a concurrent session
+    // has written.
+    const theirs = literal('hunter2-correct-horse-guard', 'sk-ant-api03-uuuu')
+    let stored = snap([theirs])
+    const port = {
+      get: async () => { throw new Error('store unreadable') },
+      set: async (_k: string, v: unknown) => { stored = v },
+      readFile: async () => '',
+    }
+    resetKnownStore()
+    await save(port, [])
+    ok('RC a read failure skips the save rather than erasing the store',
+      (stored as any).entries.length === 1)
+  }
+
+  resetKnownStore()
 }
 
 // DS a degraded store. Everything below reached the vault through `load()`

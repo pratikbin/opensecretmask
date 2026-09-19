@@ -14,6 +14,7 @@
 const R = new URL('../hooks', import.meta.url).pathname
 const { register } = await import(`${R}/register.ts`)
 const { resetStatus } = await import(`${R}/status.ts`)
+const { resetKnownStore } = await import(`${R}/vault/persist.ts`)
 
 let pass = 0, fail = 0
 const ok = (n: string, c: boolean) => { c ? pass++ : fail++; console.log(`${c ? 'PASS' : 'FAIL'}  ${n}`) }
@@ -34,6 +35,7 @@ function seat(stored?: unknown, envFiles: Record<string, string> = {}, options: 
   const statuses: string[] = []
   // A fresh module keeps no drawn line, and neither should a fresh seat.
   resetStatus()
+  resetKnownStore()
   const $ = {
     fs: {
       exists: async (p: string) => p in envFiles,

@@ -75,6 +75,31 @@ export const STORE_KEY = 'osm.vault.v1'
 
 const DAY_MS = 86_400_000
 
+/** A stable identity for an entry, independent of its fake or provenance. */
+export function identityKey(entry: Entry): string {
+  return entry.kind === 'env' ? `env\0${entry.file}\0${entry.key}` : `literal\0${entry.secret}`
+}
+
+/**
+ * Identities this session already reconciled with the store: what `load()`
+ * found there, plus whatever this session has since written itself.
+ *
+ * Exists because the vault only grows. Two sessions share one store file, and
+ * a session's own snapshot never drops an entry another session removed from
+ * disk — so a blind overwrite of "everything I currently hold" resurrects
+ * every purge a concurrent session made since this one started. `save()`
+ * treats an identity in this set but missing from a fresh disk read as a
+ * removal to respect, not damage to repair, and adds only what is genuinely
+ * new. Module state, not per-call: it lives for one load of the plugin, the
+ * same lifetime as the vault it backs. `resetKnownStore()` is the test-only
+ * escape hatch, same pattern as `status.ts`'s `resetStatus()`.
+ */
+let known = new Set<string>()
+
+export function resetKnownStore(): void {
+  known = new Set()
+}
+
 function isEntry(v: unknown): v is Entry {
   if (typeof v !== 'object' || v === null) return false
   const e = v as Record<string, unknown>
@@ -142,14 +167,43 @@ export async function load(
     resolved.push({ entry, secret })
   }
 
+  known = new Set(resolved.map((r) => identityKey(r.entry)))
   return resolved
 }
 
-/** Writes the snapshot. A failure is swallowed: persistence never breaks a turn. */
+/**
+ * Reconciles this session's entries onto a fresh read of the store, and
+ * writes the result. A failure is swallowed: persistence never breaks a turn.
+ *
+ * Not a blind overwrite. An identity already on disk keeps disk's copy — a
+ * concurrent session's fake for the same secret wins arbitrarily rather than
+ * being clobbered every few tool calls. An identity this session already knew
+ * about (see `known`) but that vanished from disk is left gone. Only what
+ * this session holds that is new to both counts as new, and only that gets
+ * added.
+ *
+ * If the read itself fails, the whole save is skipped rather than falling
+ * back to overwriting: a transient read failure must not be read as "nothing
+ * was ever on disk", which would silently drop every entry a concurrent
+ * session has written. The next tool call retries.
+ */
 export async function save(port: PersistPort, entries: readonly Entry[]): Promise<void> {
   try {
-    await port.set(STORE_KEY, { version: 1, entries: [...entries] } satisfies Snapshot)
+    const raw = (await port.get(STORE_KEY)) as Partial<Snapshot> | undefined
+    const disk = raw?.version === 1 && Array.isArray(raw.entries) ? raw.entries.filter(isEntry) : []
+
+    const merged = new Map<string, Entry>()
+    for (const e of disk) merged.set(identityKey(e), e)
+    for (const e of entries) {
+      const key = identityKey(e)
+      if (merged.has(key) || known.has(key)) continue
+      merged.set(key, e)
+    }
+
+    await port.set(STORE_KEY, { version: 1, entries: [...merged.values()] } satisfies Snapshot)
+    known = new Set(merged.keys())
   } catch {
-    // Store full, disk read-only, engine refused. The session continues.
+    // Store full, disk read-only, engine refused, or the read above failed.
+    // The session continues; the next save retries.
   }
 }

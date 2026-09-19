@@ -32,7 +32,7 @@ Everything else in this codebase is negotiable. That is not.
 | `hooks/vault/index.ts` | The two-way map, and the ledger behind `/osm-secrets` |
 | `hooks/vault/garble.ts` | The format-preserving fake |
 | `hooks/vault/walk.ts` | Bounded deep traversal, binary-safe |
-| `hooks/vault/persist.ts` | `$.store` backing, on by default via the manifest |
+| `hooks/vault/persist.ts` | `$.store` backing, on by default via the manifest; reconciles rather than overwrites |
 | `hooks/detect/index.ts` | The scanner |
 | `hooks/detect/prefix.ts` | Literal-prefix extraction |
 | `hooks/detect/entropy.ts` | Shannon layer |
@@ -147,6 +147,27 @@ suppressed there: under an explicit credential name they are usually real.
 the same second. `Entry` now carries `rule`, `where` and `firstAt`, and a row
 whose store predates them says "earlier session" rather than inventing one.
 
+**The store is shared, and the vault only grows, so a save must reconcile.**
+`~/.claude/plugins/store/osm_<key>-<hash>.json` is one file per machine, not
+per session, and two Claude Code sessions on the same repo write it
+concurrently. A vault never drops an entry it once adopted, so a session whose
+in-memory copy predates another session's purge would, on its own next save,
+write everything it still holds — including the purged entry — straight back.
+Demonstrated twice in one day: hand-purging the store is close to pointless
+while a second session is running, because that session's routine save
+silently undoes it a few tool calls later.
+
+`save()` no longer overwrites. It rereads the store, keeps whatever identity
+is already there, drops nothing, and adds only what this session holds that is
+new to both the disk and to what this session itself last knew (`known` in
+`persist.ts`, seeded by `load()`). An identity in `known` but missing from a
+fresh read is a purge to respect, not damage to repair. A read that fails
+skips the whole save rather than being read as "disk was empty" — that would
+silently erase whatever a concurrent session had written. This does not make
+concurrent purges safe in general, only routine growth: a purge run at the
+same moment as another session's save is still a race, same as editing any
+shared file.
+
 **The log channel wraps, so a column table is not a table.** `$.ui.log` draws
 one line that the terminal folds at its own width, and a ledger row holds a PEM
 key with newlines in it. `/osm-secrets` bounds every field and prints one line
@@ -249,7 +270,7 @@ instead, because the engine rewrites the file.
 ## Build and test
 
 ```sh
-bun run scripts/unit-check.ts                          # 132 pure-logic checks
+bun run scripts/unit-check.ts                          # 138 pure-logic checks
 bun run scripts/hook-check.ts                          # 35 hook-level checks
 bun run scripts/corpus-check.ts                        # our rules vs upstream fixtures
 bun run scripts/fetch-corpus.ts                        # refresh corpus/, needs network
