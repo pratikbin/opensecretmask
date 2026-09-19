@@ -1,4 +1,4 @@
-import { literalPrefixLen, scan, scanValues, DEFAULT_DETECT, type DetectConfig } from '../detect'
+import { literalPrefixLen, scan, DEFAULT_DETECT, type DetectConfig } from '../detect'
 import { MIN_SECRET_LEN } from '../env'
 
 import { garble } from './garble'
@@ -194,27 +194,34 @@ export class Vault {
   mask(text: string, where = 'unknown'): string {
     if (text === '') return text
 
-    const candidates = new Set<string>()
-    for (const value of scanValues(text, this.cfg)) {
-      if (value.length >= MIN_SECRET_LEN) candidates.add(value)
+    // `scan`, not `scanValues`: a capture-group rule's evidence is the
+    // context it matched (`PASSWORD=…`), which is gone from the extracted
+    // value alone. Re-deriving the rule name later by re-scanning the bare
+    // secret can only ever confirm a whole-value rule, so every context-caught
+    // secret came back labelled `detected` — not because nothing recognised
+    // it, but because nothing recognises it a second time with the context
+    // thrown away. `scan` already knows which rule matched while the context
+    // is still there, so carrying that forward costs nothing extra.
+    const candidates = new Map<string, string>()
+    for (const { value, rule } of scan(text, this.cfg)) {
+      if (value.length >= MIN_SECRET_LEN) candidates.set(value, rule)
     }
     // Every secret the vault has ever seen stays a candidate, not just the
     // ones registered from a file. A value first caught by a context-bearing
     // rule (`aws_secret_access_key = "…"`) must still be masked when it turns
-    // up later on its own, where no rule would fire.
+    // up later on its own, where no rule would fire. It is already noted, so
+    // its rule name is never read below.
     for (const secret of this.#bySecret.keys()) {
-      if (text.includes(secret)) candidates.add(secret)
+      if (text.includes(secret) && !candidates.has(secret)) candidates.set(secret, 'unknown')
     }
 
     let out = text
-    for (const secret of [...candidates].sort((a, b) => b.length - a.length)) {
+    for (const secret of [...candidates.keys()].sort((a, b) => b.length - a.length)) {
       // A fake already in flight must never be masked a second time.
       if (this.#byMask.has(secret)) continue
-      // The rule name costs one scan of the value itself, once per secret per
-      // session, and never on the hot path: a known secret is already noted.
       const origin = this.#bySecret.has(secret)
         ? undefined
-        : { rule: scan(secret, this.cfg)[0]?.rule ?? 'detected', where }
+        : { rule: candidates.get(secret)!, where }
       const fake = this.maskOf(secret, origin)
       const parts = out.split(secret)
       if (parts.length === 1) continue

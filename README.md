@@ -415,7 +415,7 @@ a timer: synchronous work cannot overrun a deadline it blocks.
 ## Tests
 
 ```sh
-bun run scripts/unit-check.ts   # 138 checks on the pure logic
+bun run scripts/unit-check.ts   # 150 checks on the pure logic
 bun run scripts/hook-check.ts   # 35 checks on the hooks, through a fake engine
 bun run scripts/corpus-check.ts # our rules against gitleaks, Nosey Parker and secretlint fixtures
 npx --yes --package typescript@5 tsc -p tsconfig.json

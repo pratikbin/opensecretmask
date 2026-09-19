@@ -141,6 +141,24 @@ trimmed form are tested, because trimming removes the very brackets that make a
 reference recognisable. Plain hex and digit runs are deliberately NOT
 suppressed there: under an explicit credential name they are usually real.
 
+**A label re-derived after the fact is a guess, not a record.** `mask()` used
+to learn a new secret's rule name by re-scanning the bare captured value on
+its own — `scan(secret, cfg)[0]?.rule ?? 'detected'` — after the surrounding
+text that made it a match was already gone. That reproduces a whole-value
+rule (`sk-ant-…` still looks like itself alone) but never a context rule:
+`PASSWORD=(\S{8,})` needs `PASSWORD=` in the scanned text to fire, and the
+extracted value alone does not have it. So every secret any of the eight
+context rules ever caught — including a real one — came back labelled
+`detected`, indistinguishable from "no rule recognises this at all". Two
+rounds of deny-rule fixes (URI references, chained assignments) kept the store
+filling with `detected` entries anyway, because the bug was never which
+values got flagged; it was that the label carried no information once made.
+`mask()` now takes the rule from `scan(text, cfg)`'s `Finding`, computed while
+the context is still there, and threads it straight to `maskOf()`. `detected`
+cannot be produced by any code path anymore — an entry still carrying it in
+the store predates this fix and its label was never trustworthy to begin
+with, which is a purge, not a rule you can point to.
+
 **A restored entry must carry its provenance or every row reads alike.**
 `adopt()` once stamped each restored pair `literal / store / now`, so after a
 `/reload-plugins` all thirty-four rows of `/osm-secrets` said the same thing at
@@ -280,7 +298,7 @@ instead, because the engine rewrites the file.
 ## Build and test
 
 ```sh
-bun run scripts/unit-check.ts                          # 138 pure-logic checks
+bun run scripts/unit-check.ts                          # 150 pure-logic checks
 bun run scripts/hook-check.ts                          # 35 hook-level checks
 bun run scripts/corpus-check.ts                        # our rules vs upstream fixtures
 bun run scripts/fetch-corpus.ts                        # refresh corpus/, needs network

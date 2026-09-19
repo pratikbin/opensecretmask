@@ -472,6 +472,19 @@ console.log(`rules: ${RULES.length}\n`)
   ok('LG ledger names the rule that fired', seen.rule !== 'detected' && seen.rule.length > 0)
   ok('LG ledger names the channel', seen.where === 'Read' && found !== '')
 
+  // A capture-group rule's evidence is the context it matched, not the
+  // extracted value's own shape: `DB_PASSWORD=hunter2-…` carries the rule,
+  // `hunter2-…` alone carries nothing a whole-value rule would recognise.
+  // Re-deriving the rule by re-scanning the bare value after the fact — what
+  // mask() used to do — mislabels every context-caught secret `detected`,
+  // which is indistinguishable from "no rule fired" and made an unrelated
+  // debt of stale store entries look like the ruleset's fault.
+  const ctxVault = new Vault()
+  ctxVault.mask('DB_PASSWORD=hunter2-correct-horse-battery-staple', 'Bash')
+  const [ctxSeen] = ctxVault.ledger()
+  ok('LG a context-caught secret keeps its real rule name',
+    ctxSeen.rule === 'Environment Variable Secret')
+
   // What the store carries back: the row must still name the rule, the
   // channel and the first sighting, not the moment of the reload.
   const next = new Vault()
