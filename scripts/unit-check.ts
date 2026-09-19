@@ -277,6 +277,12 @@ console.log(`rules: ${RULES.length}\n`)
   keep('a truncated key from documentation', 'sk-ant-api03-Zx8Q2mLp')
   keep('a truncated openai key', 'sk-proj-Zx8Q2mLp')
   keep('an ssn inside a longer run', 'build 1234-56-78901')
+  // `\S{8,}` does not stop at whitespace that is not there: a second
+  // NAME=value glued straight onto the first reads as one token, and the
+  // session store held exactly this — a captured value that was itself
+  // `ARTIFACT_TOKEN=oss://bucket/path`, which `Secret reference` alone cannot
+  // deny because that rule requires the whole value to be a bare locator.
+  keep('a second assignment glued to the first', 'CONFIG_API_KEY=ARTIFACT_TOKEN=oss://my-bucket/path/to/object')
 
   // And the real things the same rules exist for still go.
   hit('FP a full anthropic key', KEY)
@@ -335,6 +341,12 @@ console.log(`rules: ${RULES.length}\n`)
     denialOf('postgres://user:Xk29fmQpLz@host/db') === undefined)
   ok('DY a real value is denied by nothing', denialOf('hunter2-correct-horse') === undefined)
   ok('DY hex under a name is still a candidate', !isPlaceholder('a1b2c3d4'.repeat(4)))
+  ok('DY a glued second assignment is denied as chained',
+    denialOf('ARTIFACT_TOKEN=oss://my-bucket/path')?.name === 'Chained assignment')
+  // The value must actually be credential-named, or a base64 secret that
+  // happens to contain '_' or '-' before its own '=' padding would be denied.
+  ok('DY a value merely containing "=" is not denied as chained',
+    denialOf('QWxhZGRpbi1vcGVuX3Nlc2FtZQ==') === undefined)
 }
 
 // round trip still works

@@ -68,6 +68,18 @@ export const denyRules: readonly Deny[] = [
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     'an identifier, and a session id under a credential name is still an id',
   ),
+  // `\S{8,}` does not stop at a second assignment glued on with no whitespace
+  // — a compact debug dump or a joined log line reads as one token. The
+  // session store held `ARTIFACT_TOKEN=oss://bucket/path` captured whole under
+  // an unrelated `API_KEY=`, which `Secret reference` above cannot catch: that
+  // rule requires the ENTIRE value to be a bare locator, and this one is a
+  // second name glued to the front of one. The vocabulary matches
+  // `env.ts`'s `SECRETISH` and the builtin `Environment Variable Secret` rule.
+  deny(
+    'Chained assignment',
+    /^[A-Za-z][A-Za-z0-9]*[_-](?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|CREDENTIAL|PRIVATE|AUTH|DSN|SALT|SIGNATURE|CERT)[A-Za-z0-9_-]*\s*=/i,
+    'a second NAME=value swallowed whole, not the value the first name pointed at',
+  ),
 ]
 
 /**
