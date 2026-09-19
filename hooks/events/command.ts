@@ -40,6 +40,37 @@ export function elide(value: string): string {
 /** The widest a secret or a fake is drawn. Bounded so a row cannot wrap. */
 const CELL = 22
 
+/** The widest the provenance suffix is drawn. Metadata, not a secret: a plain truncation is fine. */
+const PROV_CELL = 28
+
+/**
+ * `rule · where`, or `rule · file[:key]` for an `env` secret, bounded to
+ * `PROV_CELL`.
+ *
+ * `where` is a tool name for a value caught on its way out (`Bash`, `Read`,
+ * `WebFetch`, …) or a channel tag for one caught elsewhere (`prompt`,
+ * `compact`, `skill:commit`). An `env` secret's `where` is always its own
+ * `file` — `register()` sets one from the other — so showing both would
+ * spend half the budget repeating the same path; `file`/`key` names the
+ * `.env` entry instead, which is the more useful half of the pair.
+ */
+export function provenance(e: LedgerEntry): string {
+  const location = e.file ? `${e.file}${e.key ? `:${e.key}` : ''}` : e.where
+  const text = `${e.rule} · ${location}`
+  return text.length <= PROV_CELL ? text : `${text.slice(0, PROV_CELL - 1)}…`
+}
+
+/** How long ago `at` was, in the coarsest unit that still fits: `3m`, `2h`, `5d`. */
+export function age(at: number, now: number = Date.now()): string {
+  const s = Math.max(0, Math.floor((now - at) / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h`
+  return `${Math.floor(h / 24)}d`
+}
+
 /**
  * `value` as one short, single-line, middle-hidden fragment.
  *
@@ -54,7 +85,7 @@ export function preview(value: string): string {
 }
 
 /** The report as lines, one secret per line. Pure, so the unit checks can read it. */
-export function secretsTable(entries: readonly LedgerEntry[]): string[] {
+export function secretsTable(entries: readonly LedgerEntry[], now: number = Date.now()): string[] {
   if (entries.length === 0) {
     return ['osm: no secrets masked yet this session.']
   }
@@ -63,7 +94,9 @@ export function secretsTable(entries: readonly LedgerEntry[]): string[] {
   return [
     `osm: ${entries.length} secret${entries.length === 1 ? '' : 's'} this session (real → fake)`,
     ...entries.map(
-      (e, i) => `${String(i + 1).padStart(width)}. ${preview(e.secret)} → ${preview(e.fake)}`,
+      (e, i) =>
+        `${String(i + 1).padStart(width)}. ${preview(e.secret)} → ${preview(e.fake)}` +
+        `  ${provenance(e)}  (${age(e.at, now)} ago)`,
     ),
   ]
 }

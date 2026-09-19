@@ -90,16 +90,19 @@ masked, beside the fake it wears.
 
 ```
 osm: 3 secrets this session (real → fake)
-1. sk-ant-api•••i05rP (53) → sk-ant-loz•••kG8uT (53)
-2. ghp_1a2B3c•••VwXyZ (40) → ghn_6b0H6u•••NqZeA (40)
-3. -----BEGIN•••Y----- (72) → -----BEGIN•••K----- (72)
+1. sk-ant-api•••i05rP (53) → sk-ant-loz•••kG8uT (53)  Anthropic API Key · Bash  (3m ago)
+2. ghp_1a2B3c•••VwXyZ (40) → ghn_6b0H6u•••NqZeA (40)  GitHub PAT · /repo/.env:GH_TOKEN  (1h ago)
+3. -----BEGIN•••Y----- (72) → -----BEGIN•••K----- (72)  Private Key · Read  (2d ago)
 ```
 
 One bounded line per secret, not a column table: a PEM key carries newlines and
 a JWT runs to 300 characters, so aligned columns come apart the moment a real
 session has thirty secrets in it. Both values keep their ends, lose the middle
 and state their true length, which is enough to match a row against your `.env`
-without printing the credential whole. The list goes out through the engine's
+without printing the credential whole. The rule and the channel come after —
+a tool name (`Bash`, `Read`) for a value caught on its way out, or the
+`.env` file and key for one registered at session start — followed by how
+long ago it was first seen. The list goes out through the engine's
 user-only log channel, so **the model never receives it** — printing it as the command's own output would hand the model
 every fake beside its original, which is the leak the plugin exists to prevent.
 It is still on your screen and in the debug log, so treat a shared terminal

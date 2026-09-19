@@ -174,6 +174,16 @@ key with newlines in it. `/osm-secrets` bounds every field and prints one line
 per secret instead; an aligned table survived the tests and fell apart on a
 real session's 34 entries.
 
+**Provenance is metadata, not a secret, so it is truncated rather than
+elided.** `/osm-secrets`'s row also carries `rule · where` (or `rule ·
+file:key` for an `env` secret — `register()` always sets `where` to the file
+itself, so showing both would spend half the row's budget saying the same
+path twice) and how long ago the secret was first seen, from `LedgerEntry.at`.
+Unlike a secret's own preview, which must keep its true length recognisable,
+provenance carries no format to preserve: a plain cut at `PROV_CELL`
+characters is enough, because a rule name or a file path losing its tail costs
+nothing a user needs.
+
 **A command's `{ text }` is model-facing.** `command.run` output lands in the
 transcript the model reads, so `/osm-secrets` answers `{}` and draws its rows
 with `$.ui.log`, which the engine shows dim and never sends to the model. The
@@ -294,8 +304,8 @@ need no model and catch the failure with no symptom, where the module is
 rejected, no hook loads, and every other scenario quietly reports the
 control's answer.
 
-**In-process checks cannot answer "did it leave masked".** 129 unit checks and
-35 hook checks all assert that our hook *returned* a fake. None can show the
+**In-process checks cannot answer "did it leave masked".** Every unit and hook
+check asserts that our hook *returned* a fake. None can show the
 engine *sent* one — a skipped hook fails open and a returned `ref` makes core
 serve the messages it already built, and both look fine from inside. The only
 ground truth is the request body, which `scripts/wire-e2e.sh` reads by putting

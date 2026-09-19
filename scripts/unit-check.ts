@@ -17,7 +17,7 @@ const { isOpaque } = await import(`${R}/vault/walk.ts`)
 const { load, save, prune, identityKey, resetKnownStore } = await import(`${R}/vault/persist.ts`)
 const { readOptions } = await import(`${R}/options.ts`)
 const { guard } = await import(`${R}/policy/budget.ts`)
-const { elide, secretsTable } = await import(`${R}/events/command.ts`)
+const { elide, secretsTable, provenance, age } = await import(`${R}/events/command.ts`)
 
 let pass = 0, fail = 0
 const ok = (n: string, c: boolean) => { c ? pass++ : fail++; console.log(`${c ? 'PASS' : 'FAIL'}  ${n}`) }
@@ -480,13 +480,33 @@ console.log(`rules: ${RULES.length}\n`)
   const carried = next.ledger()[0]
   ok('LG provenance survives the store', carried.rule === entry.rule && carried.where === entry.where)
   ok('LG first sighting survives the store', carried.at === entry.at)
-  ok('LG table is the pairs and nothing else', secretsTable(v.ledger())[1]!.split('→').length === 2)
+  ok('LG table row has exactly one pair', secretsTable(v.ledger())[1]!.split('→').length === 2)
+  ok('LG table row names the rule and the channel',
+    secretsTable(v.ledger())[1]!.includes(entry.rule) && secretsTable(v.ledger())[1]!.includes(entry.where))
 
   const table = secretsTable(v.ledger())
   ok('LG table never prints the whole secret', !table.join('\n').includes(KEY))
   ok('LG table pairs each secret with its fake', table.join('\n').includes(fake.slice(0, 10)))
   ok('LG table keeps every row on one line', table.every((l: string) => !l.includes('\n') && l.length < 140))
   ok('LG table says so when empty', secretsTable([])[0].includes('no secrets'))
+
+  ok('LG provenance names the env file', provenance({ ...entry }).includes('/work/.env'))
+  ok('LG provenance does not repeat where it already equals file',
+    // register() always sets where to the file itself for an env secret, so
+    // showing both would spend half the budget saying the same path twice.
+    (provenance({ ...entry }).match(/\/work\/\.env/g) ?? []).length === 1)
+  ok('LG provenance falls back to where when there is no file', provenance(seen).includes(seen.where))
+  ok('LG provenance is bounded even for a long rule name',
+    provenance({ ...entry, rule: 'X'.repeat(80), file: undefined, key: undefined }).length <= 29)
+
+  const now = Date.now()
+  ok('LG age counts seconds', age(now - 5_000, now) === '5s')
+  ok('LG age counts minutes', age(now - 5 * 60_000, now) === '5m')
+  ok('LG age counts hours', age(now - 5 * 3_600_000, now) === '5h')
+  ok('LG age counts days', age(now - 5 * 86_400_000, now) === '5d')
+  ok('LG age never goes negative', age(now + 10_000, now) === '0s')
+
+  ok('LG table row shows the age', secretsTable(v.ledger(), Date.now())[1]!.includes('ago)'))
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)
