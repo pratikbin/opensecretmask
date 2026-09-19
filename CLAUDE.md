@@ -131,8 +131,11 @@ becoming folklore.
 construction, but a context-bearing rule takes whatever sits right of
 `PASSWORD=`, and the session store showed what that collects: `${DB_PASSWORD}`,
 `[MASKED-0001]`, the literal word PASSWORD out of a documented DSN, a UUID,
-a 1Password `op://` reference read off a documentation page, and this
-repository's own rule source read back as a value. Only `group > 0`
+a 1Password `op://` reference read off a documentation page, this
+repository's own rule source read back as a value, and — `\S{8,}` does not
+stop at whitespace that is not there — a second `NAME=value` glued onto the
+first with no separator, which reads as one token and defeats `Secret
+reference` because the whole capture is no longer a bare locator. Only `group > 0`
 matches run through `trimCapture` and `isPlaceholder`, and both the raw and the
 trimmed form are tested, because trimming removes the very brackets that make a
 reference recognisable. Plain hex and digit runs are deliberately NOT
@@ -246,7 +249,7 @@ instead, because the engine rewrites the file.
 ## Build and test
 
 ```sh
-bun run scripts/unit-check.ts                          # 129 pure-logic checks
+bun run scripts/unit-check.ts                          # 132 pure-logic checks
 bun run scripts/hook-check.ts                          # 35 hook-level checks
 bun run scripts/corpus-check.ts                        # our rules vs upstream fixtures
 bun run scripts/fetch-corpus.ts                        # refresh corpus/, needs network
