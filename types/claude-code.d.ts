@@ -1,10 +1,13 @@
-// Written by Claude Code 2.1.276.
+// Written by Claude Code 2.1.278.
 // Claude Code function hooks: the plugin API's TypeScript declarations.
 //
 // EARLY ACCESS: this surface may change between releases without notice.
 // Written by `/plugin-types`; regenerate with that command after an update
 // rather than editing. The first line names the Claude Code version that
-// wrote it. TypeScript 5.4 or newer reads it.
+// wrote it. TypeScript 5.4 or newer reads it. `claude plugin validate <dir>`
+// is the other half: it reads a plugin's manifest and its hooks module's
+// source the way the engine will and reports what the module hooks and
+// calls and everything the engine would refuse, before any session loads it.
 //
 // What is here: the module a hooks module may import types from,
 //   import type { Register, On, EngineInterface } from 'claude-code'
@@ -26,11 +29,30 @@
 // `test(name, async ($, on) => { ... })`, where `$` is the engine's own
 // and the hooks `on` registers sit beneath every plugin; with describe,
 // expect, tier, and `mock`, whose clock, store and env answer those nouns
-// beneath the plugins from memory. `$.ui.press` presses a Button a test's
-// `$.ui.render` drew and `$.ui.mount` mounts a `Client` it drew, its surface
-// module loaded and driven (keys, pointer, posts, its frame clock) as the
-// terminal drives one, so a test covers the module and its `ui.message`
-// round trip too.
+// beneath the plugins from memory. `$.ui.mount` draws a component through
+// the plugin on the surface the test names (terminal, desktop, vscode or
+// mobile: never assumed) and hands back the drawing to read and act on by
+// key: find an element, press a Button, type into an Input, drive a
+// `Client`'s module (keys, pointer, posts, its frame clock), each act typed
+// by that surface's element table, so one test body run over several
+// surfaces covers the mod's hooks and description on each. It exercises
+// the mod (its hooks, the tree they return under each surface's rules, its
+// `Client` modules), never a surface's paint (Ink's, the desktop page's):
+//
+//   test('notes add up on every surface that takes input', async $ => {
+//     for (const surface of ['terminal', 'desktop'] as const) {
+//       const ui = await $.ui.mount({ plugin: 'notes', surface, ...BAND })
+//       await ui.input({ key: 'new', text: 'milk' })
+//       expect((await ui.find({ key: 'count' }))?.text).toBe('1 note')
+//       await ui.key({ key: 'down', in: 'list' })
+//       await ui.unmount()
+//     }
+//     for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+//       const ui = await $.ui.mount({ plugin: 'notes', surface, ...HINT })
+//       expect(await ui.find({ type: 'Text', text: /notes/ })).toBeDefined()
+//       await ui.press({ key: 'dismiss' })
+//     }
+//   })
 //
 // Typing a plugin against it:
 //   export const register: Register = (on, options) => { ... }
@@ -794,12 +816,12 @@ declare module 'claude-code' {
        */
       label?: string;
       /**
-       * One digit (`"1"`) or one lowercase letter (`"w"`) that presses it where
-       * the site honours one (the `AbovePrompt` band); anything else is refused.
+       * One digit (`"1"`) or one lowercase letter (`"w"`) that presses it while
+       * the plugin's site holds the focus; anything else is refused.
        *
-       * A digit presses from an empty composer; a digit or letter presses on
-       * keydown while one of the band's Buttons has the focus (Shift+w matches
-       * `"w"`; held keys repeat). Of two Buttons on one hotkey the later wins.
+       * The band after ctrl+x tab or a click, a focused `Pane`; never from the
+       * composer, save a bare digit in an empty one pressing a band Button, as a
+       * survey is answered. Shift+w matches `"w"`; two on one key, the later wins.
        */
       hotkey?: string;
       /**
@@ -1080,9 +1102,9 @@ declare module 'claude-code' {
    * The element table a surface module draws with, `surface.elements`: the
    * terminal's (Elements) less `Client` (none nests), `Raster` and `Image`.
    *
-   * What `$.ui.resolve(e)` is to a hooks module, with no `$`: `const { Box } =
-   * surface.elements`. A Button, Input or Select keeps its handler here and
-   * still raises `ui.press` etc.; a Markdown draws here without `onLinkPress`.
+   * What `$.ui.resolve(e)` is to a hooks module; a Button, Input or Select
+   * keeps its handler here. A tree of them keeps every tree's bounds (20,000
+   * nodes, 32 deep, 100,000 characters serialized) or the instance unmounts.
    */
   export type ClientElements = Omit<Elements['terminal'], 'Client' | 'Raster' | 'Image'>;
 
@@ -1108,15 +1130,18 @@ declare module 'claude-code' {
    * The component a surface module exports (default, or its one PascalCase
    * export): from props and surface to the tree drawn (no nested `Client`).
    *
-   * Runs in the plugin's surface environment on the drawing thread, under a
-   * time budget per call; a throw or an overrun unmounts the instance and
-   * draws one line naming the plugin and the module in its place.
+   * Runs on the drawing thread, a second per call at most; `h` and `Fragment`
+   * are the environment's, so nothing of the module's takes those names. A
+   * throw, an overrun or a tree past the bounds (ClientElements) unmounts it.
+   *
+   * @example
+   * const Tag: ClientModule<string> = (t, s) => s.elements.Text({ children: t })
    */
   export type ClientModule<P extends JsonValue = JsonValue, S = unknown> = (props: P, surface: ClientSurface<S>) => RenderElement;
 
   /**
    * One pointer event over a `Client`'s region, as `surface.onPointer` hands
-   * it: cell coordinates relative to the region's top-left corner.
+   * it: region-relative cells, and the sub-cell position where known.
    *
    * After a `down` in the region the instance holds the pointer until the
    * `up`: every `move` reaches it, past the edges too (negative, or beyond
@@ -1133,6 +1158,21 @@ declare module 'claude-code' {
        * The row under the pointer, 0 at the region's top edge.
        */
       y: number;
+      /**
+       * The same position with the fraction of a cell kept (`x: 12`, `fine.x:
+       * 12.375`), where the surface knows it: a terminal that reports pixels.
+       *
+       * kitty, Ghostty, iTerm2, WezTerm and foot do; tmux passes none through.
+       * Absent elsewhere and on `enter`/`leave`; present, a `move` comes within
+       * a cell too. What a module showing another program's pixels forwards.
+       *
+       * @example
+       * surface.onPointer(e => click((e.fine?.x ?? e.x + 0.5) * pixelsPerCell))
+       */
+      fine?: {
+          x: number;
+          y: number;
+      };
       /**
        * Which button is down (`down`, `move` while held) or came up (`up`);
        * absent on a hover `move`, `enter` and `leave`.
@@ -1221,6 +1261,9 @@ declare module 'claude-code' {
       /**
        * Replaces the local state and schedules one more call of the function on
        * the next frame; several calls before it coalesce into one redraw.
+       *
+       * A `setState` on each of three renders in a row with no key, pointer,
+       * tick, press or props between is a render loop: the instance unmounts.
        */
       setState: (next: S) => void;
       /**
@@ -1255,7 +1298,8 @@ declare module 'claude-code' {
        * `ui.message` only that plugin's hooks see, one per frame at most.
        *
        * A later post in the same frame replaces an undelivered one; a hook
-       * answering `{ props }` hands this instance its next props.
+       * answering `{ props }` hands this instance its next props. At most
+       * 20,000 values, 32 deep, 100,000 characters, or the post is not sent.
        */
       post: (data: JsonValue) => void;
   };
@@ -2007,27 +2051,31 @@ declare module 'claude-code' {
            *
            * A render hook whose state changed (a countdown) calls it for a redraw, at
            * most ten a second, thirty for the shown pane and the band (calls sooner
-           * fold); a `prompt.section` or `prompt.context` hook: dropped next turn.
+           * fold); a prompt section, context or attachment hook: dropped next turn.
            *
-           * @param event `ui.render`, `prompt.section`, `prompt.context`,
-           *              `tool.describe`, `command.describe` or `config.describe`
+           * @param event `ui.render`, or a cached-answer event: `prompt.section`,
+           *   `prompt.context`, `prompt.attachment`, `tool/command/config.describe`
            */
           invalidate: (event: InvalidatableEventName) => void;
           /**
-           * Repaints a `Raster` this plugin's own render hook drew, still mounted,
-           * with new cells, without the redraw `invalidate` asks for.
+           * Repaints a mounted `Raster` this plugin's own render hook drew with new
+           * cells, or swaps a keyed `Image` it drew to a new source; no redraw.
            *
-           * The surface keeps the cells for that Raster (by site and `key`) and
-           * paints them at its next frame, so blits between frames fold into one:
-           * an animation runs at the frame rate. A resize is a redraw instead.
+           * The surface paints the cells or source at its next frame, so blits
+           * between frames fold into one: up to 120 a second taken, some sixty
+           * shown. An Image swap sends one small command; a resize is a redraw.
            *
-           * @param args `requestId` (the site), `key` (the Raster's), `cells`
-           *             (RasterProps), `columns` and `rows` (the mounted size)
-           * @returns `{}` once the cells are its next frame, or `{ deny }` (not
-           *          mounted, not this plugin's, another size, cells that do not
-           *          decode)
+           * @param args `requestId` (the site), `key`, and `cells` (RasterProps) or
+           *             `source` (ImageSource); `columns`, `rows` (the mounted size)
+           * @returns `{}` once the cells or source are its next frame, or `{ deny }`
+           *          (not mounted, not this plugin's, another size, cells that do
+           *          not decode, a bad source, or an Image drawing its alt there:
+           *          no placeholder images, or a file this terminal cannot read)
            * @example
            * $.clock.every(33, () => $.ui.blit({ requestId, key, cells: frame() }))
+           * @example
+           * await $.ui.blit({ requestId: 'browser', key: 'view',
+           *   source: { shm: name, format: 'rgb', width, height } })
            */
           blit: (args: UiBlitArgs) => Promise<UiBlitResult>;
           /**
@@ -2084,7 +2132,8 @@ declare module 'claude-code' {
            *
            * It leaves the transcript and the model untouched.
            *
-           * @param text the line to show
+           * @param text the line to show; an unpaired surrogate half in it is drawn
+           *   as U+FFFD
            * @param options `timeoutMs`: how long it stays (default 4000)
            * @example
            * $.ui.toast(`turn took ${Math.round(e.durationMs / 1000)} s`)
@@ -2096,7 +2145,8 @@ declare module 'claude-code' {
            *
            * One per plugin; `undefined` removes it.
            *
-           * @param text the line to keep on screen; undefined clears it
+           * @param text the line to keep on screen (an unpaired surrogate half is
+           *   drawn as U+FFFD); undefined clears it
            * @example
            * $.ui.status("thinking..."); return next(e)
            */
@@ -2110,7 +2160,7 @@ declare module 'claude-code' {
            * waits undrawn below 144 columns (110 once asked), judged at each open.
            *
            * @param pane `id` (1-64 of letters, digits, `_`, `-`), `title`, `focus`,
-           *   `closeOnEscape` and `holdToasts` (a dialog), `rows` it wants inline
+           *   `closeOnEscape` and `holdToasts` (a dialog), `rows` / `columns` wanted
            * @returns settles once the pane is open (or retitled)
            * @example
            * await $.ui.open({ id: "clock", title: "Clock" })
@@ -2271,9 +2321,9 @@ declare module 'claude-code' {
            * Calls `tool` on one of the engine's connected MCP servers with the
            * engine's own connection and credentials.
            *
-           * A `cached` server is dialed on first use. Resolves to the tool's result
-           * as MCP returns it: `content` blocks and `isError`. No permission prompt:
-           * the plugin's call, seen by the hooks above it, is the grant.
+           * A `cached` server is dialed on first use. No permission prompt: the
+           * plugin's call, seen by the hooks above it, is the grant. Positional, not
+           * the `{ tool: "mcp__server__tool", ... }` shape a `tool.call` hook sees.
            *
            * @param server the server's name as /mcp lists it (`claude.ai Gmail`;
            *   the tool-name spelling `claude_ai_Gmail` is accepted too)
@@ -2282,7 +2332,10 @@ declare module 'claude-code' {
            * @returns the tool's result as MCP returns it: `content` blocks and
            *          `isError`
            * @example
-           * const { content } = await $.mcp.call("claude.ai Gmail", "create_draft")
+           * const { content } = await $.mcp.call("claude.ai Gmail", "create_draft", {
+           *   to: "team@example.com",
+           *   subject: "Release notes",
+           * })
            */
           call: (server: string, tool: string, args?: Record<string, unknown>) => Promise<McpToolResult>;
       };
@@ -2645,23 +2698,33 @@ declare module 'claude-code' {
           register: (spec: AgentSpec) => Promise<OpValueOf['agent.register']>;
       };
       /**
-       * The file system as the engine's own process reaches it, text only
-       * (UTF-8); a relative path is under the session's working directory.
+       * The file system as the engine's own process reaches it; a relative path
+       * is under the session's working directory, and text is UTF-8.
        *
-       * An absolute path is used as given. A read or a write over 4 MiB
-       * rejects; what the operating system refuses rejects with its errno
-       * (`ENOENT`, `EACCES`). Where a path may go is an `fs.*` hook's to say.
+       * An absolute path is used as given; where one may go is an `fs.*` hook's
+       * to say. A read or write over 4 MiB rejects, a foreign network location
+       * as spelled rejects untouched, and an OS refusal rejects with its errno.
        */
       fs: {
           /**
-           * Reads a file and returns its text. Rejects when missing.
+           * Reads a file and returns its text, or with `{ as: "bytes" }` its bytes
+           * as `{ base64 }`.
+           *
+           * Rejects when missing, or over 4 MiB, which bounds what one read copies
+           * into the plugin's environment. A file the plugin ships is under
+           * `$.plugin.root`.
            *
            * @param path relative to the working directory, or absolute
-           * @returns the file's text
+           * @param options `as`: `"text"` (the default) or `"bytes"`
+           * @returns the file's text, or `{ base64 }`
            * @example
            * const readme = await $.fs.read("README.md")
+           * @example
+           * const { base64 } = await $.fs.read(
+           *   `${$.plugin.root}/hooks/weights.bin`, { as: "bytes" })
+           * const weights = Uint8Array.fromBase64(base64)
            */
-          read: (path: string) => Promise<string>;
+          read: FsReadCall;
           /**
            * Writes `text` to a file, creating it and its directories as needed.
            *
@@ -2670,34 +2733,90 @@ declare module 'claude-code' {
            */
           write: (path: string, text: string) => Promise<void>;
           /**
-           * Lists a directory: `{ name, kind, size }` per entry, by name.
+           * Lists a directory: `{ name, kind, size, isLink }` per entry, by name,
+           * each entry as it stands (a symbolic link is `other` with `isLink`).
            *
            * @param path the directory's path; absent, the working directory
-           * @returns the entries, `{ name, kind, size }` each
+           * @returns the entries, `{ name, kind, size, isLink }` each
            */
           list: (path?: string) => Promise<FsEntry[]>;
           /**
-           * Returns whether the path exists; never rejects.
+           * Returns whether the path exists; rejects only a network location as
+           * spelled, which no `fs` call reaches.
            */
           exists: (path: string) => Promise<boolean>;
           /**
-           * Returns `{ kind, size, mtimeMs }` of the path. Rejects when missing.
+           * Returns `{ kind, size, mtimeMs, isLink }` of the path: what it leads to,
+           * and whether it is itself a symbolic link. Rejects when missing.
+           *
+           * With `{ resolve: true }` also `realPath`, where the path lands, absent
+           * when it leads nowhere; a guard matches it and denies without it, since a
+           * spelling it cannot resolve (`~`, a file not there yet) the tool may open.
+           *
+           * @param path relative to the working directory, or absolute
+           * @param options `resolve`: also answer `realPath` (one more file system
+           *                call)
+           * @returns the stat, `realPath` with it when asked and resolvable; rejects
+           *          `ENOENT` for a missing path
+           * @example
+           * // ROOT was resolved the same way and SEP is its separator; an
+           * // allow-list under it is the robust guard, a deny-list on spellings
+           * // only best effort (a hard link or a case alias keeps its own)
+           * on("tool.call", { tool: "Read" }, async ($, e, next) => {
+           *   const stat = await $.fs.stat(e.file_path, { resolve: true })
+           *     .catch(() => undefined)
+           *   const real = stat?.realPath
+           *   const isInside = real !== undefined && real.startsWith(ROOT + SEP)
+           *   return isInside ? next(e) : { deny: "outside the project" }
+           * })
+           * @example
+           * // a Write may name a file not there yet: `placed` answers where the
+           * // path lands or undefined, and the guard denies on undefined or
+           * // outside ROOT. Unplaceable by spelling first, with no file system
+           * // call (drive-relative `D:x`, a `\\` or `//` network or device path,
+           * // a name that is empty, ".", ".." or itself `C:...`); then the file
+           * // if it stats; else its folder, cut after the last separator and
+           * // keeping it so a drive or share root stays that root, plus the name
+           * const placed = async (path) => {
+           *   const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"))
+           *   const name = path.slice(cut + 1)
+           *   const isPlaceable = !/^[A-Za-z]:(?![\\/])/.test(path) &&
+           *     !/^[\\/][\\/]/.test(path) && !/^[A-Za-z]:/.test(name) &&
+           *     name !== "" && name !== "." && name !== ".."
+           *   if (!isPlaceable) return undefined
+           *   const own = await $.fs.stat(path, { resolve: true })
+           *     .catch(() => undefined)
+           *   if (own) return own.realPath
+           *   const folder = cut < 0 ? "." : path.slice(0, cut + 1)
+           *   const dir = await $.fs.stat(folder, { resolve: true })
+           *     .catch(() => undefined)
+           *   return dir?.realPath === undefined ? undefined
+           *     : `${dir.realPath.replace(/[\\/]$/, "")}${SEP}${name}`
+           * }
+           * const real = await placed(e.file_path)
+           * const isInside = real !== undefined && real.startsWith(ROOT + SEP)
+           * return isInside ? next(e) : { deny: "cannot place it, or outside" }
            */
-          stat: (path: string) => Promise<FsStat>;
+          stat: (path: string, options?: FsStatOptions) => Promise<FsStat>;
           /**
            * Reads the named instruction files in every directory above the
            * session's original working directory, the way the engine reads CLAUDE.md.
            *
            * Root first, each `{ dir, name, content }` that exists, the content
-           * with its `@include`s after it; with `of`, on down to that file's
-           * directory, as the engine reads a nested CLAUDE.md when a file is read.
+           * with its `@include`s after it; `of` and `below` together are the
+           * engine's own walk for a nested CLAUDE.md between root and read file.
            *
-           * @param request `names`, relative `.md` file names (no `..`) looked for
-           * in each directory; `of`, the file whose directory the walk goes down to
+           * @param request `names`, relative `.md` file names (no `..`); `of`, the
+           * file walked down to; `below`, the directory the walk stays inside
            * @returns the files found, root first
            * @example
            * const found = await $.fs.ancestors({ names: ["AGENTS.md"] })
            * const stack = await $.fs.ancestors({ names: ["AGENTS.md"], of: path })
+           * const nested = await $.fs.ancestors({
+           *   names: ["AGENTS.md"],
+           *   of: e.file_path,
+           *   below: await $.session.root(),
+           * })
            */
           ancestors: (request: FsAncestorsRequest) => Promise<readonly FsAncestor[]>;
       };
@@ -2790,10 +2909,16 @@ declare module 'claude-code' {
            * `$.session.authorize()` rides https only, to a first-party host.
            *
            * @param url the URL (http or https)
-           * @param init `{ method, headers, body, auth }` (body a string)
+           * @param init `{ method, headers, body, auth, socketPath }` (body a
+           *             string; socketPath a Unix socket to go over instead of TCP)
            * @returns `{ status, ok, headers, text }` once the body is read
            * @example
            * const { ok, text } = await $.http.fetch("https://example.com/status")
+           * @example
+           * await $.http.fetch("http://bridge/reload", {
+           *   method: "POST",
+           *   socketPath: `${runDirectory}/bridge.sock`,
+           * })
            */
           fetch: (url: string, init?: HttpInit) => Promise<HttpResponse>;
       };
@@ -2957,6 +3082,14 @@ declare module 'claude-code' {
           Link: ElementConstructor<LinkProps>;
           Code: ElementConstructor<CodeProps>;
           Markdown: ElementConstructor<MarkdownProps>;
+          /**
+           * A region one of the plugin's surface modules draws (ClientModule), named
+           * by `module`: a string literal, the module's path relative to this file.
+           *
+           * The engine reads the surface module off the hooks module's source
+           * before anything runs, so a variable, a template with a substitution or
+           * a computed path as `module` is refused at load, naming the line.
+           */
           Client: ElementConstructor<ClientProps>;
           Raster: ElementConstructor<RasterProps>;
           Image: ElementConstructor<ImageProps>;
@@ -3048,8 +3181,12 @@ declare module 'claude-code' {
    */
   export type EngineCreateInput = {
       /**
-       * In list order, first is outermost (managed plugins first, so an org
-       * plugin's withholding wins).
+       * The modules this fold builds, in list order, first outermost (managed
+       * plugins first, so an org plugin's withholding wins).
+       *
+       * The whole set at a load, this plugin alone at its reload, the ones added
+       * or changed at a refresh that keeps the rest: a module added later that
+       * does not hook this event is built against the table as it stands.
        */
       plugins: readonly string[];
   };
@@ -3227,6 +3364,18 @@ declare module 'claude-code' {
        */
       'prompt.suggest': PromptSuggestInput;
       /**
+       * Fires when the person edits the main prompt box: a key the editor took as
+       * an edit, or a paste; `next(e)` resolves the box the editor shows.
+       *
+       * `e` is the draft before and the splice (`start`, `end`, `inputText`); a
+       * burst of keys is one edit. Rewrite `inputText` going down or the box
+       * coming up; `{ text: e.text, cursor: e.cursor }` without `next` consumes.
+       *
+       * @example
+       * on("prompt.edit", ($, e, next) => next({ ...e, inputText: up(e) }))
+       */
+      'prompt.edit': PromptEditInput;
+      /**
        * Fires once per named section of the system prompt, when the engine
        * assembles it; `next(e)` resolves to `{ text }` as core computed it.
        *
@@ -3251,15 +3400,29 @@ declare module 'claude-code' {
        */
       'prompt.context': PromptContextInput;
       /**
-       * Fires once per tool, when the engine first renders the tool's schema for
-       * the model in a session; `next(e)` resolves to `{ description }`.
+       * Fires once per message the engine injects for the model on its own (a
+       * reminder, a mode transition, a mentioned file), as a request carries it.
        *
-       * Rendered schemas are cached for the session until
-       * `$.ui.invalidate("tool.describe")`: an unstable answer spends the model's
-       * prompt cache on every call. A hook that fails passes it through.
+       * `next(e)` resolves to `{ text }`; `{ text: null }` leaves it out. The
+       * answer holds per attachment for the process (asked again on resume or
+       * `$.ui.invalidate`); the transcript keeps the engine's record.
        *
        * @example
-       * on("tool.describe", { tool: "Bash" }, () => ({ description: "Shell." }))
+       * on("prompt.attachment", { type: "todo_reminder" }, () => ({ text: null }))
+       */
+      'prompt.attachment': PromptAttachmentInput;
+      /**
+       * Fires once per tool, when the engine first renders the tool's schema in
+       * a session; `next(e)` resolves to `{ description, isDeferred? }`.
+       *
+       * Cached for the session until `$.ui.invalidate("tool.describe")`: an
+       * unstable answer spends the model's prompt cache. An explicit `isDeferred`
+       * moves the tool behind ToolSearch (true) or into the prompt's list (false).
+       *
+       * @example
+       * on("tool.describe", { tool: "Bash" }, ($, e) => ({ ...e, description }))
+       * @example
+       * on("tool.describe", { tool: "Monitor" }, pin) // {...e, isDeferred: false}
        */
       'tool.describe': ToolDescribeInput;
       /**
@@ -3334,11 +3497,11 @@ declare module 'claude-code' {
       'attribution.text': AttributionTextInput;
       /**
        * Fires once per process for each loaded plugin, before the first prompt,
-       * and again for one that loads or reloads later; `next(e)` is `{ cwd }`.
+       * then once per fresh load of one (never `/clear`); `next(e)` is `{ cwd }`.
        *
-       * Observe. The first is awaited, so a `$.tool.register` here is listed by
-       * turn one. A later one (an edit, new options, `/reload-plugins`, an enable)
-       * runs that plugin's hooks alone, so its timers start again. Not `/clear`.
+       * Observe. The first is awaited: a `$.tool.register` is listed by turn one.
+       * A later one runs its hooks alone: an enable, a worker respawn, or a reload
+       * (changed modules only; all if one hooks `engine.create`/`plugin.register`).
        *
        * @example
        * on("session.start", ($, e, next) => $.tool.register(t).then(() => next(e)))
@@ -3549,6 +3712,10 @@ declare module 'claude-code' {
        */
       'prompt.suggest': PromptSuggestResult;
       /**
+       * `{ text, cursor }`, the box the editor shows next.
+       */
+      'prompt.edit': PromptEditResult;
+      /**
        * `{ text }` (null leaves the section out).
        */
       'prompt.section': PromptSectionResult;
@@ -3557,7 +3724,11 @@ declare module 'claude-code' {
        */
       'prompt.context': PromptContextResult;
       /**
-       * `{ description }`.
+       * `{ text }` (null leaves the attachment out).
+       */
+      'prompt.attachment': PromptAttachmentResult;
+      /**
+       * `{ description, isDeferred? }`.
        */
       'tool.describe': ToolDescribeResult;
       /**
@@ -3663,6 +3834,7 @@ declare module 'claude-code' {
           suggest: (input: PromptSuggestArgs) => Promise<PromptSuggestResult>;
           section: (input: PromptSectionInput) => Promise<PromptSectionResult>;
           context: (input: PromptContextInput) => Promise<PromptContextResult>;
+          attachment: (input: PromptAttachmentInput) => Promise<PromptAttachmentResult>;
       };
       skill: {
           prompt: (input: SkillPromptInput) => Promise<SkillPromptResult>;
@@ -3797,7 +3969,7 @@ declare module 'claude-code' {
 
   /**
    * The argument of `$.fs.ancestors`: the file names to look for in each
-   * directory, and the file to walk down to.
+   * directory, the file to walk down to, and the directory to walk beneath.
    */
   export type FsAncestorsRequest = {
       /**
@@ -3809,10 +3981,31 @@ declare module 'claude-code' {
        * working directory or absolute; absent, it ends at the working directory.
        */
       of?: string;
+      /**
+       * The directory the walk starts beneath, relative to the working directory
+       * or absolute; absent, the walk starts at the filesystem root.
+       *
+       * Only directories strictly inside it are read, so with `of` a file under
+       * the project root the walk reads the directories between the two, as the
+       * engine reads a nested CLAUDE.md; a file not inside it finds nothing.
+       */
+      below?: string;
   };
 
   /**
-   * One entry of `$.fs.list`.
+   * What `$.fs.read(path, { as: "bytes" })` resolves with: the file's bytes,
+   * base64, since only plain data crosses into a plugin's environment.
+   */
+  export type FsBytes = {
+      /**
+       * The file's content, standard padded base64;
+       * `Uint8Array.fromBase64(base64)` gives the bytes back.
+       */
+      base64: string;
+  };
+
+  /**
+   * One entry of `$.fs.list`: the entry itself, a link not followed.
    */
   export type FsEntry = {
       /**
@@ -3820,21 +4013,65 @@ declare module 'claude-code' {
        */
       name: string;
       /**
-       * `file`, `dir`, or `other`.
+       * `file`, `dir`, or `other`, of the entry itself: a symbolic link is
+       * `other` (`$.fs.stat` says what it leads to, and with `resolve` where).
        */
       kind: 'file' | 'dir' | 'other';
       /**
        * Bytes, for a file.
        */
       size: number;
+      /**
+       * True when the entry is a symbolic link.
+       */
+      isLink: boolean;
   };
 
   /**
-   * What `$.fs.stat` resolves with.
+   * How `$.fs.read` answers: `text` (UTF-8, the default) or `bytes` (base64).
+   */
+  export type FsReadAs = 'text' | 'bytes';
+
+  /**
+   * The options of `$.fs.read` that ask for the bytes: the call answers
+   * `{ base64 }`.
+   */
+  export type FsReadBytesOptions = {
+      /**
+       * `bytes`.
+       */
+      as: 'bytes';
+  };
+
+  /**
+   * `$.fs.read`: the file's text, or with `{ as: "bytes" }` its bytes as
+   * `{ base64 }`.
+   */
+  export type FsReadCall = {
+      (path: string): Promise<string>;
+      (path: string, options: FsReadBytesOptions): Promise<FsBytes>;
+      (path: string, options: FsReadOptions): Promise<string | FsBytes>;
+  };
+
+  /**
+   * The options of `$.fs.read`.
+   */
+  export type FsReadOptions = {
+      /**
+       * `bytes` answers `{ base64 }` for a binary file; `text` (the default) the
+       * file's text.
+       */
+      as: FsReadAs;
+  };
+
+  /**
+   * What `$.fs.stat` resolves with: what the path leads to, whether the path
+   * itself is a symbolic link, and where it lands when asked.
    */
   export type FsStat = {
       /**
-       * `file`, `dir`, or `other`.
+       * `file`, `dir`, or `other`, of what the path leads to: a link is
+       * followed, and one that leads nowhere is `other`.
        */
       kind: 'file' | 'dir' | 'other';
       /**
@@ -3845,6 +4082,37 @@ declare module 'claude-code' {
        * Last modification, milliseconds since the epoch.
        */
       mtimeMs: number;
+      /**
+       * True when the path itself is a symbolic link; `kind`, `size` and
+       * `mtimeMs` then describe what it points at, or the link when that is gone.
+       */
+      isLink: boolean;
+      /**
+       * Where the path landed when asked with `{ resolve: true }`: absolute,
+       * every symbolic link followed, `.` and `..` folded; else absent.
+       *
+       * Absent too when the path leads nowhere or a hook above withheld it, so
+       * a guard denies without it; and a hard link, a volume or file-id spelling
+       * (macOS `/.vol/`) or a case alias keeps its own spelling, `isLink` false.
+       *
+       * @remarks a deny-list on spellings is thus best effort; an allow-list on
+       *          `realPath` under a root resolved the same way is the robust guard.
+       */
+      realPath?: string;
+  };
+
+  /**
+   * The options of `$.fs.stat`.
+   */
+  export type FsStatOptions = {
+      /**
+       * True to resolve where the path lands as well.
+       *
+       * The answer then carries `realPath` when the path leads somewhere, at
+       * the cost of one more file system call: where it landed then, not a hold
+       * on what a tool opens afterwards.
+       */
+      resolve: boolean;
   };
 
   /**
@@ -4022,6 +4290,18 @@ declare module 'claude-code' {
        * session's credential header itself, only for a first-party host.
        */
       auth?: string;
+      /**
+       * The absolute path of a Unix domain socket the request goes over instead
+       * of TCP (near 100 B at most): one per session, in a private directory.
+       *
+       * The URL still gives path, query and Host; redirects stay on it; no proxy;
+       * `https:` is TLS verified against the URL's host (always, once `auth`
+       * rides), so a credential reaches only its host. No relative path, no NUL.
+       *
+       * @example
+       * await $.http.fetch(url, { socketPath: `${runDirectory}/bridge.sock` })
+       */
+      socketPath?: string;
   };
 
   /**
@@ -4047,19 +4327,63 @@ declare module 'claude-code' {
   };
 
   /**
-   * The props of `Image`, the terminal surface's picture leaf: pixels over a box
-   * of cells where the terminal can (kitty, Ghostty), the `alt` text elsewhere.
+   * A `$.ui.blit` argument swapping one of the caller's mounted keyed Images
+   * to its next picture; every call sends it, so a stream needs no generation.
    *
-   * A leaf: no children, `hover` or `onPress`. The cells are text to the surface,
-   * so the picture scrolls and clips as a word does; drawn again with other
-   * `source` bytes it is replaced in place. Terminal only; elsewhere a fragment.
+   * The surface writes them with its frames, some sixty a second: byte and
+   * `file` sources fold to the last per frame; every `shm` source reaches the
+   * terminal (it unlinks each), and is denied while frames are not written.
+   *
+   * @example await $.ui.blit({ requestId: 'browser', key: 'view',
+   *   source: { shm: '/tb-4', format: 'rgb', width: 1280, height: 720 } })
+   */
+  export type ImageBlitArgs = {
+      /**
+       * The site the Image is drawn in, by the `requestId` this plugin draws it
+       * under.
+       */
+      requestId: string;
+      /**
+       * The Image's `key` in that drawing.
+       */
+      key: string;
+      /**
+       * The next picture (ImageSource): bytes, or a name the terminal reads.
+       */
+      source: ImageSource;
+      /**
+       * Refused unless it is the mounted Image's width in cells. Absent, that.
+       */
+      columns?: number;
+      /**
+       * Refused unless it is the mounted Image's height in cells. Absent, that.
+       */
+      rows?: number;
+  };
+
+  /**
+   * The props of `Image`, the terminal surface's picture leaf: pixels over a
+   * box of cells where the terminal can (kitty, Ghostty), the `alt` elsewhere.
+   *
+   * A leaf: no children, `hover` or `onPress`; the cells are text, so the
+   * picture scrolls and clips as a word does. Drawn again with another `source`
+   * it is replaced in place; keyed, `$.ui.blit` swaps it at the frame rate.
    *
    * @example const { bytes } = await $.fs.read('chart.png', { as: 'bytes' })
    * <Image source={{ png: bytes.toBase64() }} columns={40} rows={12} alt="p95" />
+   * @example <Image key="view" source={{ shm: '/tb-7', format: 'rgb', width: 960,
+   *   height: 600 }} columns={80} rows={25} alt="the page" />
    */
   export type ImageProps = {
       /**
-       * The picture's bytes (ImageSource): `{ png }` or `{ rgba, width, height }`.
+       * The element's address within the drawing: what `$.ui.blit` names to swap.
+       *
+       * Unique among the Images of one tree; absent, only a redraw changes it.
+       */
+      key?: string;
+      /**
+       * The picture (ImageSource): `{ png }` or `{ rgba, width, height }` bytes,
+       * or `{ file, format }` / `{ shm, format, width, height }` read here.
        */
       source: ImageSource;
       /** How many terminal columns wide, 1 to 255; the picture is scaled to fill
@@ -4070,19 +4394,28 @@ declare module 'claude-code' {
        */
       rows: number;
       /**
-       * What the picture says, drawn dim in its place on a terminal that cannot
-       * show it (and read by a screen reader); required, may be a single space.
+       * What the picture says, drawn dim in its place where the picture cannot
+       * be (and read by a screen reader); required, may be a single space.
        */
       alt: string;
   };
 
   /**
-   * The picture an `Image` shows, as bytes the plugin already holds.
+   * The picture an `Image` shows: base64 bytes the plugin holds (at most 2 MiB
+   * decoded), or the name of a file or POSIX shared-memory object it does not.
    *
-   * Read with `$.fs.read(path, { as: 'bytes' })` or fetched, never a path the
-   * host reads for it: standard padded base64, at most 2 MiB decoded either
-   * way. `png` is a PNG file the terminal decodes; `rgba` is raw 8-bit pixels,
-   * `width * height * 4` bytes, row-major, for a frame a plugin computed.
+   * A name is one another process on this machine wrote; the terminal, running
+   * as the person, opens, reads and decodes it itself, so no pixel crosses `$`
+   * and the engine never touches it. One it will not read (not a regular file,
+   * under `/proc`, `/sys` or `/dev`, gone, across ssh) draws a blank box, its
+   * words in the debug log; it unlinks a shared-memory object once read, so
+   * each frame is a fresh one. A source equal to the last drawn sends nothing;
+   * `generation` makes new content under an unchanged name a new source.
+   *
+   * @example { rgba: pixels.toBase64(), width: 64, height: 32 }
+   * @example { file: '/dev/shm/frame-3.rgba', format: 'rgba', width: 640,
+   *   height: 400 }
+   * @example { shm: '/tb-view-2', format: 'rgb', width: 1280, height: 720 }
    */
   export type ImageSource = {
       /**
@@ -4102,6 +4435,72 @@ declare module 'claude-code' {
        * Rows of pixels, 1 to 2048.
        */
       height: number;
+  } | {
+      /**
+       * The absolute path of a regular file holding a whole PNG, at most
+       * 3072 bytes of path; read by the terminal, left in place.
+       */
+      file: string;
+      /**
+       * The file is a whole PNG; the terminal decodes it and sizes it itself.
+       */
+      format: 'png';
+      /**
+       * A whole number that changes when the file's content does under the
+       * same path, so a redraw reads it again; absent, the path alone tells.
+       */
+      generation?: number;
+  } | {
+      /**
+       * The absolute path of a regular file of `width * height` raw pixels, at
+       * most 3072 bytes of path; read by the terminal, left in place.
+       *
+       * On Linux a file under `/dev/shm` is memory.
+       */
+      file: string;
+      /**
+       * `rgba`, 4 bytes a pixel, or `rgb`, 3.
+       */
+      format: 'rgba' | 'rgb';
+      /**
+       * Pixels per row, 1 to 4096.
+       */
+      width: number;
+      /**
+       * Rows of pixels, 1 to 4096.
+       */
+      height: number;
+      /**
+       * A whole number that changes when the file's content does under the
+       * same path, so a redraw reads it again; absent, the path alone tells.
+       */
+      generation?: number;
+  } | {
+      /**
+       * The name of a POSIX shared-memory object of `width * height` raw
+       * pixels: `/` then up to 254 of `A-Z a-z 0-9 . _ -` (macOS takes 30).
+       *
+       * The terminal unlinks it after reading, so a name feeds one Image
+       * drawn once and is never sent again on a redraw; POSIX terminals only.
+       */
+      shm: string;
+      /**
+       * `rgba`, 4 bytes a pixel, or `rgb`, 3.
+       */
+      format: 'rgba' | 'rgb';
+      /**
+       * Pixels per row, 1 to 4096.
+       */
+      width: number;
+      /**
+       * Rows of pixels, 1 to 4096.
+       */
+      height: number;
+      /**
+       * A whole number that changes when a fresh object reuses a name, so a
+       * redraw reads it again; absent, the name alone tells.
+       */
+      generation?: number;
   };
 
   /**
@@ -4213,10 +4612,10 @@ declare module 'claude-code' {
   };
 
   /**
-   * What `$.ui.invalidate` takes: a render event, or one of the five events
+   * What `$.ui.invalidate` takes: a render event, or one of the six events
    * whose answers the engine caches for the session.
    */
-  export type InvalidatableEventName = RenderEventName | 'prompt.section' | 'prompt.context' | 'tool.describe' | 'command.describe' | 'config.describe';
+  export type InvalidatableEventName = RenderEventName | 'prompt.section' | 'prompt.context' | 'prompt.attachment' | 'tool.describe' | 'command.describe' | 'config.describe';
 
   /**
    * Whether tag key `K` selects members of `I`: it does when each member gives
@@ -4526,16 +4925,26 @@ declare module 'claude-code' {
   };
 
   /**
-   * The MCP branch: one variant per declared tool when McpToolInputs has
-   * entries, else one loose variant over every `mcp__*` name.
+   * The MCP branch of a `tool.call` hook's `e` (and of `$.tool.call`'s input):
+   * one variant per declared tool, else the loose McpToolCallInputFallback.
+   *
+   * `$.mcp.call(server, tool, args)` takes none of these: its parameters are
+   * positional, the server and tool by name, then the arguments object.
    */
   export type McpToolCallInput = [keyof McpToolInputs] extends [never] ? McpToolCallInputFallback : {
       [N in keyof McpToolInputs & string]: ToolInputOf<N, McpToolInputs[N] & Record<string, unknown>>;
   }[keyof McpToolInputs & string];
 
   /**
-   * The MCP branch's answer when no MCP tool is declared: every `mcp__*`
-   * name, its args unconstrained.
+   * The `e` a `tool.call` (or `classic.PreToolUse`) hook receives for an MCP
+   * tool while no MCP tool is declared: every `mcp__*` name, loose arguments.
+   *
+   * McpToolInputs has no entries until `/plugin-types` writes the connected
+   * tools' declarations; also the `input` of `$.tool.call({ tool:
+   * "mcp__<server>__<tool>", ... })`. Not `$.mcp.call`'s, which is positional:
+   *
+   * @example
+   * on("tool.call", { tool: "mcp__gh__issue" }, ($, e, next) => audit(e.title))
    */
   type McpToolCallInputFallback = {
       /**
@@ -5220,15 +5629,17 @@ declare module 'claude-code' {
        */
       'ui.panes': NoArgs;
       /**
-       * The argument of `$.ui.blit({ requestId, key, cells })`; a hook above
-       * the painter may repaint the cells with `next`, or refuse with `{ deny }`.
+       * The argument of `$.ui.blit(...)`: a Raster's `cells` or a keyed Image's
+       * `source`; a hook above may rewrite either with `next`, or `{ deny }`.
        */
       'ui.blit': UiBlitArgs;
       /**
-       * The argument of `$.fs.read(path)`.
+       * The argument of `$.fs.read(path, { as })`: `as` is `text` unless the
+       * caller asked for `bytes`.
        */
       'fs.read': {
           path: string;
+          as: FsReadAs;
       };
       /**
        * The argument of `$.fs.write(path, text)`.
@@ -5250,13 +5661,15 @@ declare module 'claude-code' {
           path: string;
       };
       /**
-       * The argument of `$.fs.stat(path)`.
+       * The argument of `$.fs.stat(path, { resolve })`: `resolve` is false
+       * unless the caller asked where the path lands.
        */
       'fs.stat': {
           path: string;
+          resolve: boolean;
       };
       /**
-       * The argument of `$.fs.ancestors({ names, of })`.
+       * The argument of `$.fs.ancestors({ names, of, below })`.
        */
       'fs.ancestors': FsAncestorsRequest;
       /**
@@ -5397,7 +5810,10 @@ declare module 'claude-code' {
        */
       'ui.panes': readonly UiPane[];
       'ui.blit': UiBlitResult;
-      'fs.read': string;
+      /**
+       * The text; `{ base64 }` when asked for bytes.
+       */
+      'fs.read': string | FsBytes;
       'fs.write': void;
       'fs.list': FsEntry[];
       'fs.exists': boolean;
@@ -5496,7 +5912,7 @@ declare module 'claude-code' {
 
   /**
    * The argument of `$.ui.open`: which pane, its title, whether it asks the
-   * person's keyboard, its dialog manners, and the rows it wants inline.
+   * person's keyboard, its dialog manners, its size: rows inline, columns docked.
    *
    * An open answering the person's input (a command or prompt they entered, a
    * press) is placed at any width; one the plugin makes on its own waits
@@ -5513,6 +5929,9 @@ declare module 'claude-code' {
       /**
        * The pane's tab while more than one pane is open (with one, no title is
        * drawn), and the `title` its hook sees; the id when omitted.
+       *
+       * An unpaired surrogate half (a `.slice()` through an emoji) is drawn as
+       * U+FFFD; a control character is refused.
        */
       title?: string;
       /**
@@ -5527,6 +5946,11 @@ declare module 'claude-code' {
       /**
        * While the pane holds the keyboard, the key that hands it back (Escape)
        * also closes it as the person's close does: `ui.close`, origin `person`.
+       *
+       * So does Escape at an idle, empty prompt once the prompt has the keys
+       * again (the person typed, or `focus` was refused); over text, a running
+       * turn, a dialog, a footer selection, a viewed agent's transcript or a
+       * prompt mode of its own the key stays theirs.
        *
        * A hook may refuse that close and keep it open. Left out, Escape returns
        * the keys to the prompt and the pane stays. Each open sets it anew, as it
@@ -5550,6 +5974,18 @@ declare module 'claude-code' {
        * positive whole number; left out, a third. Each open sets it anew.
        */
       rows?: number;
+      /**
+       * The body columns the pane's content wants while docked beside a
+       * fullscreen transcript: the dock opens that wide, floor to ceiling.
+       *
+       * A request, not a grant: a width the person dragged or keyed the dock
+       * to wins, this session's or a kept one, and the inline block ignores
+       * it. A positive whole number; left out, the share. Each open sets it anew.
+       *
+       * @example
+       * await $.ui.open({ id: "browser", focus: true, rows: 24, columns: 100 })
+       */
+      columns?: number;
   };
 
   /**
@@ -6050,21 +6486,95 @@ declare module 'claude-code' {
   };
 
   /**
-   * A pasted or attached non-text item of a prompt; its kind, never its bytes.
+   * The input of `prompt.attachment`: one message the engine injects into the
+   * conversation for the model on its own, as a request is about to carry it.
+   *
+   * A reminder, a mode transition, a listing, a mentioned file, a hook's
+   * context: the person never typed it and mostly never sees it. Only an
+   * attachment that carries text for the model is raised.
    */
-  export type PromptAttachment = {
+  export type PromptAttachmentInput = {
       /**
-       * The item's kind.
+       * As the engine names the attachment's kind; the key a matcher narrows on.
+       * Pinned. Builds add and retire kinds: match by name.
+       *
+       * Among them `todo_reminder`, `plan_mode`, `plan_mode_exit`, `auto_mode`,
+       * `auto_mode_exit`, `instructions`, `nested_memory`, `skill_listing`,
+       * `deferred_tools_delta`, `edited_text_file`, `file`, `queued_command`.
        */
-      type: 'image' | 'audio' | 'document';
+      type: string;
       /**
-       * The item's MIME type (`image/png`), when known.
+       * What the model reads for this attachment, inside the engine's framing;
+       * rewritable with `next({ ...e, text })`.
+       *
+       * The `<system-reminder>` wrapper (or the system channel that replaces it)
+       * goes around what the chain answers, never inside it. An attachment
+       * rendered as several text blocks hands them joined by newlines.
        */
-      mediaType?: string;
+      text: string;
       /**
-       * The pasted file's name, when it had one.
+       * Who authored the text (PromptAttachmentOrigin): the engine, a settings
+       * hook, or a plugin's chain context.
+       *
+       * Pinned: a different value is refused, one left out is kept.
        */
-      filename?: string;
+      origin: PromptAttachmentOrigin;
+      /**
+       * The loop whose request carries the attachment: a subagent's id, the `id`
+       * `$.agent.list()` gives it and its `tool.call`s carry; absent on main.
+       *
+       * Pinned: a different value is refused, one left out is kept. A subagent
+       * a hook spawned through `$.agent.spawn` is resolved past that hook.
+       */
+      agentId?: string;
+  };
+
+  /**
+   * Who authored the text an injected attachment carries, as the engine knows
+   * it from the attachment itself; a closed set, pinned on the event.
+   *
+   * A hooks module reads `e.origin.kind` to tell the engine's own prose from a
+   * settings hook's output or another plugin's context. `next(e)` passes it on
+   * as received; one left out is put back; no hook sets one.
+   */
+  export type PromptAttachmentOrigin = {
+      /**
+       * The engine's own prose or framing: a reminder, a mode transition, a
+       * listing, a notice, an announced context block.
+       *
+       * A file the person mentioned, as the engine presents it, and a prompt
+       * or notification delivered into a running turn are the engine's too.
+       */
+      kind: 'engine';
+  } | {
+      /**
+       * A settings hook's output the engine injects for the model: its
+       * additional context, a blocking error's note, a stopped continuation.
+       */
+      kind: 'hook';
+      /**
+       * The settings hook event that produced it (`SessionStart`,
+       * `UserPromptSubmit`, `PostToolUse`, ...).
+       */
+      event: string;
+  } | {
+      /**
+       * Text a plugin's hook attached through a chain's `context`
+       * (`prompt.submit`, `tool.call`), as the model reads it.
+       */
+      kind: 'plugin';
+      /**
+       * The chain's event that attached it.
+       */
+      event: string;
+  };
+
+  /**
+   * What a `prompt.attachment` hook returns: the text the model reads for that
+   * attachment, or null to leave the attachment out of the request.
+   */
+  export type PromptAttachmentResult = {
+      text: string | null;
   };
 
   /**
@@ -6155,6 +6665,75 @@ declare module 'claude-code' {
        */
       instructionFiles?: readonly InstructionFile[];
   };
+
+  /**
+   * The input of `prompt.edit` (prompt-edit/): one edit the person makes in the
+   * prompt box, as the draft before it and the splice the editor made of it.
+   */
+  export type PromptEditInput = {
+      /**
+       * Who edits (PromptEditOrigin): the person at the composer. Pinned:
+       * `next(e)` passes it on as received.
+       */
+      origin: PromptEditOrigin;
+      /**
+       * The one key that made the edit, in `Client` `onKey`'s shape, when one
+       * did; absent for a paste and for a burst of keys folded into one edit.
+       *
+       * Pinned: which key the person pressed is a fact, not the hook's to change.
+       */
+      key?: ClientKeyEvent;
+      /**
+       * The draft before the edit. `next({ ...e, text })` applies the edit to
+       * another draft instead.
+       */
+      text: string;
+      /**
+       * Where the person's caret stood in `text` before the edit, 0 to
+       * `text.length`.
+       */
+      cursor: number;
+      /**
+       * Where in `text` the edit begins: the start of the span it replaces, or
+       * where what was typed goes in; a bare cursor move begins where it lands.
+       */
+      start: number;
+      /**
+       * Where the replaced span of `text` ends: `start` for an insertion or a
+       * move, past it for a deletion (Backspace, a kill).
+       */
+      end: number;
+      /**
+       * What goes in between `start` and `end`: the typed or pasted text, `''` for
+       * a deletion or a move.
+       *
+       * `next({ ...e, inputText })` puts in another; the cursor lands after it.
+       */
+      inputText: string;
+  };
+
+  /**
+   * Who edits the prompt box at `prompt.edit`, as the engine stamps it where
+   * the edit starts; a closed set a matcher narrows on.
+   *
+   * `next(e)` passes it on as received; no hook sets one.
+   */
+  export type PromptEditOrigin = {
+      /**
+       * The person, typing or pasting into the main prompt box.
+       */
+      kind: 'composer';
+  };
+
+  /**
+   * What a `prompt.edit` hook returns and what `next(e)` resolves to: the box
+   * after the edit (PromptBox), which the editor then shows.
+   *
+   * From core, `e.text` with the splice applied and the cursor after what went
+   * in. Rewrite it (`{ ...r, text, cursor }`) to change what lands; answer
+   * `{ text: e.text, cursor: e.cursor }` without `next` to consume the key.
+   */
+  export type PromptEditResult = PromptBox;
 
   /**
    * `prompt.fill`'s input as a plugin's `$.prompt.fill(args)` takes it: no
@@ -6416,6 +6995,25 @@ declare module 'claude-code' {
   export type PromptSubmitArgs = Omit<PromptSubmitInput, 'origin' | 'turnId' | 'wait' | 'context'>;
 
   /**
+   * A pasted or attached non-text item of a submitted prompt; its kind, never
+   * its bytes.
+   */
+  export type PromptSubmitAttachment = {
+      /**
+       * The item's kind.
+       */
+      type: 'image' | 'audio' | 'document';
+      /**
+       * The item's MIME type (`image/png`), when known.
+       */
+      mediaType?: string;
+      /**
+       * The pasted file's name, when it had one.
+       */
+      filename?: string;
+  };
+
+  /**
    * The input of `prompt.submit`: the prompt as typed, after the input became
    * a user message and before it enters the session.
    */
@@ -6427,7 +7025,7 @@ declare module 'claude-code' {
       /**
        * Present only when the submission carried images or other non-text items.
        */
-      attachments?: readonly PromptAttachment[];
+      attachments?: readonly PromptSubmitAttachment[];
       /**
        * What the model reads beside the prompt and the user never sees, each
        * entry one block after the prompt as typed; absent as the engine raises it.
@@ -6571,6 +7169,39 @@ declare module 'claude-code' {
   };
 
   /**
+   * A `$.ui.blit` argument repainting one of the caller's mounted Rasters.
+   *
+   * `columns` and `rows`, when given, must be the mounted size (a resize is a
+   * redraw, `$.ui.invalidate("ui.render")`, not a blit).
+   */
+  export type RasterBlitArgs = {
+      /**
+       * The site the Raster is drawn in, by the `requestId` this plugin draws
+       * it under: one of its panes' ids, a tool row's `tool_use_id`, the band's.
+       */
+      requestId: string;
+      /**
+       * The Raster's `key` in that drawing.
+       */
+      key: string;
+      /**
+       * The new cells, encoded as the element's `cells` are (RasterProps), for
+       * the mounted `columns * rows`.
+       */
+      cells: string;
+      /**
+       * The width the cells are laid out for; refused unless it is the mounted
+       * Raster's. Absent, the mounted width.
+       */
+      columns?: number;
+      /**
+       * The height the cells are laid out for; refused unless it is the mounted
+       * Raster's. Absent, the mounted height.
+       */
+      rows?: number;
+  };
+
+  /**
    * The props of `Raster`, the terminal surface's cell-grid leaf: a fixed box
    * of cells, each a glyph, a foreground and a background, packed in `cells`.
    *
@@ -6657,7 +7288,7 @@ declare module 'claude-code' {
    * authorises an action; a plugin adds context with `$.ui.notice`. `Pane` is
    * the one component whose instances a plugin opens (`$.ui.open`).
    */
-  export type RenderComponent = 'AskUserQuestion' | 'UserMessage' | 'AssistantMessage' | 'ToolUse' | 'ToolResult' | 'ToolGroup' | 'CommandOutput' | 'Spinner' | 'TurnDuration' | 'InfoNotice' | 'SessionMode' | 'PromptHint' | 'AbovePrompt' | 'Pane';
+  export type RenderComponent = 'AskUserQuestion' | 'UserMessage' | 'AssistantMessage' | 'ToolUse' | 'ToolResult' | 'ToolGroup' | 'ToolProgress' | 'CommandOutput' | 'Spinner' | 'TurnDuration' | 'InfoNotice' | 'SessionMode' | 'PromptHint' | 'AbovePrompt' | 'Pane';
 
   /**
    * What a render hook returns, and what `next(e)` resolves to: a plain-data
@@ -6689,11 +7320,11 @@ declare module 'claude-code' {
           label: string;
           /**
            * One digit (`"1"`) or one lowercase letter (`"w"`) that presses it
-           * where the site honours one; anything else is refused.
+           * while the plugin's site holds the focus; anything else is refused.
            *
-           * A bare digit in an empty composer presses, as a survey is answered;
-           * while one of the band's Buttons has the focus a digit or a letter
-           * presses on keydown, lowercased. Two on one hotkey: the later wins.
+           * The band after ctrl+x tab or a click, a focused `Pane`: on keydown,
+           * lowercased; never from the composer, save a bare digit in an empty
+           * one pressing a band Button. Two on one hotkey: the later wins.
            */
           hotkey?: string;
           /**
@@ -6944,12 +7575,19 @@ declare module 'claude-code' {
        * A picture, the terminal surface's alone: `props.source` drawn over a
        * box of cells where the terminal can, `props.alt` where it cannot.
        *
-       * A leaf: hooks above wrap or replace it whole, nothing reaches inside;
-       * a press other plugins should see goes on an enclosing Button. On a
-       * surface whose table lacks it the tree is refused.
+       * A leaf: hooks above wrap or replace it whole; a press other plugins
+       * should see goes on an enclosing Button; keyed, its plugin's
+       * `$.ui.blit` swaps it. On a surface without it the tree is refused.
        */
       type: 'Image';
       props: ImageProps;
+      /**
+       * Whose Image: the plugin whose hook drew the element, stamped by the
+       * runtime as the tree leaves it; the one plugin whose blit reaches it.
+       */
+      image: {
+          plugin: string;
+      };
       children?: undefined;
   } | {
       /**
@@ -7023,12 +7661,14 @@ declare module 'claude-code' {
    * them under `e.props`; a hook rewrites them with `next({ ...e, props })`.
    *
    * A rewrite is validated by the component and an invalid one draws the
-   * original. This table is the plugin-facing render contract: the terminal
-   * and the Code session renderer draw these components from these props.
+   * original. This table is the plugin-facing render contract; the author's
+   * file notes which surfaces raise each member (RENDER_SURFACES_OF).
    */
   export type RenderPropsOf = {
       /**
        * The dialog the AskUserQuestion tool opens.
+       *
+       * Raised on every surface.
        */
       AskUserQuestion: {
           /**
@@ -7053,6 +7693,8 @@ declare module 'claude-code' {
        * `origin`, `task` and `from` tell them apart and are read-only; a rewrite
        * of `text` draws in the row alone: the stored message, and the model's
        * framing of another party's words as that party's, stay as they were.
+       *
+       * Raised on every surface.
        */
       UserMessage: {
           /**
@@ -7103,6 +7745,8 @@ declare module 'claude-code' {
       /**
        * One text block of an assistant reply in the transcript; a rewrite
        * changes the drawing and leaves the stored message alone (ctrl+o).
+       *
+       * Raised on every surface.
        */
       AssistantMessage: {
           /**
@@ -7126,6 +7770,8 @@ declare module 'claude-code' {
       /**
        * A tool call's row in the transcript (`Bash(ls -la)` and its result); the
        * call was decided by `tool.call`, so a rewrite here changes the row alone.
+       *
+       * Raised on every surface.
        */
       ToolUse: {
           /**
@@ -7183,6 +7829,8 @@ declare module 'claude-code' {
        * A rewrite of `output` is checked against the tool's output schema (one
        * that does not fit draws nothing; one the renderer cannot read hits the
        * row's error boundary). The stored result is untouched.
+       *
+       * Raised on every surface.
        */
       ToolResult: {
           /**
@@ -7224,6 +7872,8 @@ declare module 'claude-code' {
        *
        * A hook that sets `isExpanded` unfolds the group where it is, and each row
        * it unfolds into is a `ToolUse` drawing a `ToolUse` hook then sees.
+       *
+       * Raised on every surface.
        */
       ToolGroup: {
           /**
@@ -7259,6 +7909,8 @@ declare module 'claude-code' {
        * What the run resolved as text, a `local` command's or a plugin's alike. A
        * rewrite of `text` draws there and the stored row keeps what the model
        * reads; a hook's own tree draws in the row's place, the transcript's width.
+       *
+       * Raised on every surface.
        */
       CommandOutput: {
           /**
@@ -7295,8 +7947,45 @@ declare module 'claude-code' {
           onScreen?: OnScreen | null;
       };
       /**
+       * One row of the live tool-progress region under a running tool call; today
+       * the run-in-background pill. One instance per row.
+       *
+       * A union on `kind`: other progress kinds join as their props become plain
+       * data, each with its own fields, so a hook matches `{ props: { kind:
+       * "background_hint" } }` or branches on `e.props.kind` and stays right.
+       *
+       * Raised on the terminal surface only.
+       */
+      ToolProgress: {
+          /**
+           * The tool call the row belongs to, as `tool.call` and the `ToolUse` row
+           * carry it. Read-only: a rewrite carries it on as received.
+           *
+           * While several foreground calls share one pill, the first of them.
+           */
+          tool_use_id: string;
+          /**
+           * Which progress row: the run-in-background pill. Read-only.
+           */
+          kind: 'background_hint';
+          /**
+           * The pill's text as the engine draws it, dim, under the tool call:
+           * `(ctrl+b to run in background)`, or with the person's own binding.
+           *
+           * A rewrite is drawn in its place, dim; `""` draws nothing. A hook that
+           * returns a tree draws that instead.
+           */
+          hint: string;
+      };
+      /**
        * The line that animates while a turn runs (`Sauteing... (12s, 300
-       * tokens)`). Terminal only: the Code session renderer draws its own.
+       * tokens)`); a remote surface draws its own.
+       *
+       * The row reads `word` (or `message` while one overrides it), then
+       * `suffix`, then the dim parenthetical the engine keeps (elapsed time,
+       * tokens, effort); a hook rewrites the first three or draws its own tree.
+       *
+       * Raised on the terminal surface only.
        */
       Spinner: {
           /**
@@ -7308,13 +7997,24 @@ declare module 'claude-code' {
            */
           message: string | null;
           /**
+           * What the engine draws right after the word or message to say the turn is
+           * still going: one ellipsis character.
+           *
+           * Left off a text that already ends in an ellipsis, so a rewritten
+           * `message` ending in one shows one. A rewrite is drawn as given (`""`
+           * draws the text bare, `" ~"` draws `Sauteing ~`); left out, the engine's.
+           */
+          suffix: string;
+          /**
            * What the turn is doing.
            */
           mode: 'requesting' | 'responding' | 'thinking' | 'tool-input' | 'tool-use';
       };
       /**
-       * The line that closes a turn in the transcript (`Baked for 3s`).
-       * Terminal only: the Code session renderer draws its own footer.
+       * The line that closes a turn in the transcript (`Baked for 3s`); a
+       * remote surface draws its own footer.
+       *
+       * Raised on the terminal surface only.
        */
       TurnDuration: {
           /**
@@ -7338,7 +8038,9 @@ declare module 'claude-code' {
       };
       /**
        * One dim status line under the logo (the model source, an experiment
-       * enrollment, a settings hint), with a trailing `/command`. Terminal only.
+       * enrollment, a settings hint), with a trailing `/command`.
+       *
+       * Raised on the terminal surface only.
        */
       InfoNotice: {
           /**
@@ -7362,10 +8064,12 @@ declare module 'claude-code' {
       };
       /**
        * The dim mode labels at the right of the prompt footer (`focus`, `memory
-       * paused`), joined by ` & `. One instance; terminal only.
+       * paused`), joined by ` & `. One instance.
        *
        * A hook adds a mode by rewriting `modes`, removes one by filtering, or
        * draws its own tree.
+       *
+       * Raised on the terminal and desktop surfaces only.
        */
       SessionMode: {
           /**
@@ -7375,10 +8079,12 @@ declare module 'claude-code' {
       };
       /**
        * The dim hint line under the prompt (`? for shortcuts`, `esc to
-       * interrupt`, the pills beside them). One instance; terminal only.
+       * interrupt`, the pills beside them). One instance.
        *
        * A hook rewrites `hint` and the rewrite is drawn in the line's place, or
        * draws its own tree; `isDraft` and `isWorking` say what the line is for.
+       *
+       * Raised on the terminal surface only.
        */
       PromptHint: {
           /**
@@ -7402,9 +8108,11 @@ declare module 'claude-code' {
        * The band directly above the prompt input, where the surveys draw; the
        * engine draws nothing of its own here.
        *
-       * A hook draws a tree, or passes; one instance, terminal only. The person
-       * collapses it (ctrl+x ctrl+a, `[-]`) or focuses it (a click, ctrl+x tab):
-       * an Input types, a Button arms the hotkeys, a tree taller than it scrolls.
+       * A hook draws a tree, or passes; one instance. The person collapses it
+       * (ctrl+x ctrl+a, `[-]`) or focuses it (a click, ctrl+x tab): an Input
+       * types, a Button arms the hotkeys, a tree taller than it scrolls.
+       *
+       * Raised on the terminal surface only.
        */
       AbovePrompt: {
           /**
@@ -7419,9 +8127,9 @@ declare module 'claude-code' {
            * Rows the band may take: in fullscreen, what the bottom slot has left
            * above the prompt; otherwise the terminal's height. Read-only.
            *
+           * That slot is capped at half the terminal's rows, the prompt's included.
            * A tree of at most `maxRows` rows shows whole; a taller one scrolls in a
-           * window of `scroll.bodyRows` (one fewer, over a dim `n more` row), and a
-           * bare digit arms none of its Buttons' hotkeys.
+           * window of `scroll.bodyRows`, and a bare digit arms no Button's hotkey.
            */
           maxRows: number;
           /**
@@ -7456,6 +8164,8 @@ declare module 'claude-code' {
        * Placed by the surface (docked in fullscreen, else above the prompt) and
        * keyed by the person (ctrl+x tab, Esc), who closes it from the engine's mark
        * or ctrl+x x: `ui.close` with origin `person`, which a hook may refuse.
+       *
+       * Raised on every surface.
        */
       Pane: {
           /**
@@ -7467,7 +8177,8 @@ declare module 'claude-code' {
            */
           title: string;
           /**
-           * True while the person has given the pane the keyboard. Read-only.
+           * True while the person has given the pane the keyboard: Tab walks its
+           * elements, a Button's `hotkey` presses it, the arrows scroll. Read-only.
            */
           isFocused: boolean;
           /**
@@ -9062,6 +9773,14 @@ declare module 'claude-code' {
   };
 
   /**
+   * Where a `tool.describe` answer places the tool: `true` behind ToolSearch
+   * (its schema loads when the model asks for it), `false` in the prompt's list.
+   *
+   * Left out of an answer, the placement beneath stands.
+   */
+  export type ToolDeferral = boolean;
+
+  /**
    * The input of `tool.describe`: one tool's description, at the moment the
    * engine first renders the tool's schema for the model.
    */
@@ -9076,6 +9795,14 @@ declare module 'claude-code' {
        */
       description: string;
       /**
+       * Present, and true, when the engine lists the tool behind ToolSearch (its
+       * schema loads when the model asks for it by name); absent for one listed.
+       *
+       * By the engine's rule an MCP server's tool, or one that asks to be,
+       * unless a rule keeps it in front.
+       */
+      isDeferred?: true;
+      /**
        * Who provides this tool: the plugin and its tier; `{ plugin: "engine",
        * tier: "core" }` for a built-in. Pinned: a rewrite is refused.
        *
@@ -9087,10 +9814,15 @@ declare module 'claude-code' {
 
   /**
    * What a `tool.describe` hook returns: the description the model sees for that
-   * tool.
+   * tool and, when the hook moves it, where the tool waits (ToolDeferral).
+   *
+   * `{ description }` alone, or `{ ...(await next(e)), description }`, changes
+   * the text and keeps the engine's placement; `isDeferred: true` puts the tool
+   * behind ToolSearch, `isDeferred: false` puts its schema in the prompt's list.
    */
   export type ToolDescribeResult = {
       description: string;
+      isDeferred?: ToolDeferral;
   };
 
   /**
@@ -9234,7 +9966,8 @@ declare module 'claude-code' {
        */
       name: string;
       /**
-       * What the tool does, for the model.
+       * What the tool does, for the model (and the person where tools are
+       * listed); an unpaired surrogate half in it is drawn as U+FFFD.
        */
       description: string;
       /**
@@ -9680,51 +10413,26 @@ declare module 'claude-code' {
   };
 
   /**
-   * What a plugin's `$.ui.blit(args)` takes: which of its mounted Rasters to
-   * repaint, in which of its sites, and the cells to paint it with.
+   * What a plugin's `$.ui.blit(args)` takes: a Raster's next `cells`
+   * (RasterBlitArgs) or a keyed Image's next `source` (ImageBlitArgs).
    *
-   * The Raster is one this plugin's own `ui.render` hook drew, still mounted;
-   * `columns` and `rows`, when given, must be the mounted size (a resize is a
-   * redraw, `$.ui.invalidate("ui.render")`, not a blit).
+   * Either names an element this plugin's own `ui.render` hook drew, still
+   * mounted; a hook above may rewrite the cells or the source, never the
+   * address or which kind it is.
    */
-  export type UiBlitArgs = {
-      /**
-       * The site the Raster is drawn in, by the `requestId` this plugin draws
-       * it under: one of its panes' ids, a tool row's `tool_use_id`, the band's.
-       */
-      requestId: string;
-      /**
-       * The Raster's `key` in that drawing.
-       */
-      key: string;
-      /**
-       * The new cells, encoded as the element's `cells` are (RasterProps), for
-       * the mounted `columns * rows`.
-       */
-      cells: string;
-      /**
-       * The width the cells are laid out for; refused unless it is the mounted
-       * Raster's. Absent, the mounted width.
-       */
-      columns?: number;
-      /**
-       * The height the cells are laid out for; refused unless it is the mounted
-       * Raster's. Absent, the mounted height.
-       */
-      rows?: number;
-  };
+  export type UiBlitArgs = RasterBlitArgs | ImageBlitArgs;
 
   /**
    * What `$.ui.blit` resolves to and what a `ui.blit` hook's `{ value }`
-   * holds: `{}` once the cells are the Raster's next frame, or why not.
+   * holds: `{}` once the cells or source are the next frame's, or why not.
    */
   export type UiBlitResult = {
       /**
-       * Absent when the cells were taken; else why not: nothing of this plugin's
-       * is mounted there, the size is not the mounted one, the cells are bad.
+       * Absent when the cells or source were taken; else why not.
        *
-       * Another plugin's Raster under the same site and key reads as not this
-       * plugin's; a cell that does not decode is named by its index.
+       * Nothing of this plugin's is mounted there (another plugin's reads so),
+       * the size is not the mounted one, the cells or source are bad, or the
+       * Image draws its `alt` there, the reason spelled out for a fallback.
        */
       deny?: string;
   };
@@ -10411,12 +11119,24 @@ declare module 'claude-code' {
 
   /**
    * The globals of a hooks module's environment: these and no others (no DOM,
-   * no Node).
+   * no Node). No code generation either: `eval` and `new Function` over a
+   * string throw, and there is no `WebAssembly` (deliberately; a module that
+   * needs compiled code runs it in a process of its own through `$.process.run`).
+   * A surface module's environment (Client) has the same globals and a
+   * `console`; neither has timers (a hooks module waits on `$.clock`, a
+   * surface module on `surface.every`).
    */
   global {
     /**
      * The JSX factory (classic runtime, `@jsx h`; the engine prepends the
      * pragma): a plain-data element from a string tag or a component.
+     *
+     * JSX compiles to bare `h(...)` calls resolved by name, so a module (hooks or
+     * surface) never declares, imports or takes as a parameter anything named
+     * `h` or `Fragment` where it writes JSX, and carries no `@jsx` pragma of its
+     * own: either silently points its JSX away from this factory, and a
+     * `<Client>` tag written under another factory is not found when the
+     * module's surface modules are read off its source.
      */
     const h: (
       tag: string | ((props: never) => RenderNode | null | undefined),
@@ -10539,6 +11259,7 @@ declare module 'claude-code/testing' {
   import type { Chunk } from 'claude-code';
   import type { ClientKeyEvent } from 'claude-code';
   import type { ClientPointerEvent } from 'claude-code';
+  import type { Elements } from 'claude-code';
   import type { EventCalls } from 'claude-code';
   import type { EventName } from 'claude-code';
   import type { HookStream } from 'claude-code';
@@ -10546,11 +11267,18 @@ declare module 'claude-code/testing' {
   import type { On } from 'claude-code';
   import type { PressedLink } from 'claude-code';
   import type { Register } from 'claude-code';
+  import type { RenderComponent } from 'claude-code';
   import type { RenderElement } from 'claude-code';
+  import type { RenderPropsOf } from 'claude-code';
+  import type { RenderSurface } from 'claude-code';
+  import type { RenderViewport } from 'claude-code';
   import type { ResultOf } from 'claude-code';
   import type { StreamingEventName } from 'claude-code';
   import type { Tier } from 'claude-code';
+  import type { UiInputArgument } from 'claude-code';
+  import type { UiInputResult } from 'claude-code';
   import type { UiPressResult } from 'claude-code';
+  import type { UiSelectResult } from 'claude-code';
 
   /**
    * A value that matches by a rule inside `toEqual` and its kin
@@ -10569,6 +11297,14 @@ declare module 'claude-code/testing' {
   };
 
   /**
+   * Which `Client` of a mounted drawing an act or a read means, by the `key`
+   * its element carries; optional while the drawing holds exactly one.
+   */
+  export type ClientScope = {
+      in?: string;
+  };
+
+  /**
    * A class, as `toThrow`, `toBeInstanceOf` and `expect.any` take it.
    */
   export type Constructor = abstract new (...args: never[]) => unknown;
@@ -10583,12 +11319,52 @@ declare module 'claude-code/testing' {
   export const describe: (name: string, body: () => void) => void;
 
   /**
+   * The element each surface-dependent act of a mounted drawing reaches: a
+   * handle carries the act only where the surface's table has the element.
+   *
+   * `input` needs `Input` and `select` needs `Select` (every surface but
+   * mobile today); `key`, `pointer`, `post`, `advance` and `resize` reach a
+   * `Client` (terminal and desktop today). The rest need nothing but a tree.
+   */
+  export type ElementOfAct = {
+      input: 'Input';
+      select: 'Select';
+      key: 'Client';
+      pointer: 'Client';
+      post: 'Client';
+      advance: 'Client';
+      resize: 'Client';
+  };
+
+  /**
+   * What a mounted drawing's `find` and `findAll` match an element on, every
+   * field given at once: its tag, its `key`, and the text it shows.
+   *
+   * `text` matches the element's whole shown text (string children, a Button
+   * or Link's label, a Markdown's text, a Code's source, an Input's value):
+   * a string by inclusion, a RegExp by test.
+   *
+   * @example
+   * await ui.findAll({ type: 'Text', text: /overdue/, in: 'board' })
+   */
+  export type ElementQuery = {
+      type?: string;
+      key?: string;
+      text?: string | RegExp;
+      /**
+       * Searches what this `Client`'s surface module drew (by the `Client`'s
+       * key) instead of the plugin's own tree.
+       */
+      in?: string;
+  };
+
+  /**
    * What a test holds as `$`, the engine's own: every call on it is made as
    * the REPL, the query loop and the render sites make theirs, over every plugin.
    *
    * `next.origin` is the engine, and the whole chain runs over the plugins
-   * loaded. A tool call's `tool_use_id` is minted when left out; `$.ui.press`
-   * and `$.ui.mount` are the terminal pressing a Button, mounting a `Client`.
+   * loaded. A tool call's `tool_use_id` is minted when left out; `$.ui.mount`
+   * is a surface the test names drawing an instance, `$.ui.press` a press on it.
    */
   export type Engine = {
       [N in keyof EventCalls]: N extends 'ui' ? EngineNoun<N> & EnginePress & EngineMount : EngineNoun<N>;
@@ -10601,26 +11377,31 @@ declare module 'claude-code/testing' {
   export type EngineCall<E extends EventName> = E extends StreamingEventName ? (e: Args<E>) => HookStream<Chunk<E>, ResultOf[E]> : (e: Args<E>) => Promise<ResultOf[E]>;
 
   /**
-   * The terminal mounting a `Client` a test rendered: its surface module read,
-   * loaded and drawn as a region does it, then driven by hand.
+   * A surface drawing a component instance through the plugins, then driven
+   * by key through a handle typed by that surface (Mounted).
    *
-   * After a `$.ui.render` whose tree holds the `Client`; the mounted client's
-   * `key`, `pointer`, `post` and `advance` reach the module, `drawn` reads it.
+   * `ui.render` raised there for those props, the tree validated by that
+   * table, its `Client`s running; the reads and `press` on every surface,
+   * `input` where the table has `Input`, the `Client` acts where `Client`.
    *
    * @example
-   * await (await $.ui.mount({ plugin: "game", key: "board" })).key({ key: "up" })
+   * for (const surface of SURFACES) run(await $.ui.mount({ ...HINT, surface }))
    */
   export type EngineMount = {
       /**
-       * Mounts the `Client`, as the terminal does when the tree holding it is
-       * drawn: resolves once its surface module has loaded and drawn once.
+       * Raises the plugins' drawing of the component on the surface and holds
+       * it, as that surface showing the instance does.
        *
-       * @param target whose Client, its key, the drawing when several, its size
-       * @returns the mounted Client; rejects when no such Client is drawn on the
-       *   terminal, several drawings hold one and none is named, it is mounted
-       *   already, or its module failed or drew nothing (over a dialog's rows)
+       * Resolves once the tree validated and every `Client` in it drew once.
+       *
+       * @param target whose elements, the surface, the component, its props,
+       *   the instance's requestId, and what the surface measured
+       * @returns the mounted drawing; rejects when no `surface` (or an unknown
+       *   one) is named, when the surface cannot draw the tree the chain
+       *   returned (with the reason: an element its table lacks, a prop not
+       *   allowed), or when a `Client`'s module failed or drew nothing
        */
-      mount: (target: MountTarget) => Promise<MountedClient>;
+      mount: <P extends RenderSurface, C extends RenderComponent>(target: MountTarget<P, C>) => Promise<Mounted<P, C>>;
   };
 
   /**
@@ -10638,7 +11419,7 @@ declare module 'claude-code/testing' {
   export type EngineNounEvent<N extends keyof EventCalls> = Exclude<keyof EventCalls[N] & string, `${N}.resolve` extends 'ui.resolve' ? 'resolve' : never>;
 
   /**
-   * The terminal pressing a Button a test rendered, or a Markdown's link: the
+   * A surface pressing a Button a test rendered, or a Markdown's link: the
    * `ui.press` chain over every plugin hooked on it, its own closure last.
    */
   export type EnginePress = {
@@ -10646,10 +11427,12 @@ declare module 'claude-code/testing' {
        * Presses the Button, as a click or its hotkey does; with `link`, the
        * Markdown's link, as a click on it does.
        *
-       * @param target whose element, its key, the instance when several, and
-       *   for a Markdown the link
+       * `e.surface` is the surface of the drawing that holds it.
+       *
+       * @param target whose element, its key, the instance and surface when
+       *   several hold it, and for a Markdown the link
        * @returns what the chain settled on; rejects when no such element is
-       *   drawn on the terminal, or several are and no instance is named
+       *   drawn, or several are and neither instance nor surface tells them apart
        */
       press: (target: PressTarget) => Promise<UiPressResult | undefined>;
   };
@@ -10691,6 +11474,38 @@ declare module 'claude-code/testing' {
    * test's own leading a failure's.
    */
   export type Expecting = (received: unknown, message?: string) => Expectation;
+
+  /**
+   * One element of a mounted drawing as `find` returns it: the description
+   * the plugin's hook (or a `Client`'s module) built, read as plain data.
+   *
+   * What every surface is handed to draw, not what any surface painted: the
+   * same on the terminal, the desktop, VS Code and mobile.
+   */
+  export type FoundElement = {
+      /**
+       * The element's tag: `Box`, `Text`, `Button`, `Input`, `Client`, ...
+       */
+      type: string;
+      /**
+       * What its props carry as `key`, when they do.
+       */
+      key: string | undefined;
+      /**
+       * Its props, plain data: a Button's `label`, a Text's `color`, ...;
+       * handlers never cross (a Button's `onPress` is not here).
+       */
+      props: Record<string, unknown>;
+      /**
+       * What it shows: its string children in document order and, for the
+       * leaves that draw a prop as text, that prop (ElementQuery `text`).
+       */
+      text: string;
+      /**
+       * Its children as drawn: strings and element descriptions.
+       */
+      children: unknown[];
+  };
 
   /**
    * The checks `expect(received)` offers; each throws an AssertionError when
@@ -10982,85 +11797,275 @@ declare module 'claude-code/testing' {
   };
 
   /**
-   * A `Client` the test mounted: what its surface module drew, and the ways
-   * the terminal reaches it, each settling the event loop before it resolves.
+   * A drawing of component `C` the test mounted on surface `P`: reads over its
+   * description, acts on its elements by key, `Client` acts where `P` has one.
    *
-   * So after `await client.key(...)` a `setState` has redrawn, and a
-   * `surface.post` has run the plugin's `ui.message` hooks and handed the
-   * instance any `{ props }` they answered, before the test reads `drawn()`.
+   * Narrowed by the `surface` the test passed, as `e.surface` narrows
+   * `$.ui.resolve(e)`: no `input` on `mobile`, no `key` on `vscode`, whose
+   * tables (Elements) lack `Input` and `Client`; over a union, their meet.
    */
-  export type MountedClient = {
+  export type Mounted<P extends RenderSurface = RenderSurface, C extends RenderComponent = RenderComponent> = {
+      [K in keyof MountedMembers<P, C> as K extends keyof ElementOfAct ? ElementOfAct[K] extends keyof Elements[P] ? K : never : K]: MountedMembers<P, C>[K];
+  };
+
+  /**
+   * Every member a mounted drawing of component `C` can have; `Mounted<P, C>`
+   * keeps the ones surface `P` has the element for (ElementOfAct).
+   *
+   * Each act resolves once the loop settled and what a plugin invalidated
+   * was drawn again. The kit exercises the mod (its hooks, its description
+   * under the surface's rules, its `Client` modules), never a surface's paint.
+   */
+  export type MountedMembers<P extends RenderSurface, C extends RenderComponent = RenderComponent> = {
       /**
-       * The tree the surface module last drew, plain data as `$.ui.render`
-       * resolves one; its Buttons pressable with `$.ui.press`.
-       *
-       * @returns the tree; rejects with the fault line once the instance failed
-       *   (a throw, an overrun, a tree past the bounds), as the region draws it
+       * Where this drawing is, as the test named it.
        */
-      drawn: () => Promise<RenderElement>;
+      readonly surface: P;
       /**
-       * Hands the module's `onKey` listener one key, as a press while the
-       * region has the focus does.
+       * The tree as last drawn: what the plugins' `ui.render` chain returned
+       * for this instance, validated by the surface's table, as plain data.
        *
-       * @param event the key: `{ key: "right" }`, `{ key: "a", ctrl: true }`
+       * With `in`, what that `Client`'s surface module last drew instead.
+       *
+       * @param scope `{ in }`: a `Client`'s key, to read its module's tree
+       * @returns the tree; rejects with the refusal when the surface could not
+       *   draw what the chain returned, or with a `Client`'s fault line
+       * @example
+       * expect(await ui.drawn()).toMatchObject({ type: 'Box' })
        */
-      key: (event: ClientKeyEvent) => Promise<void>;
+      drawn: (scope?: ClientScope) => Promise<RenderElement>;
       /**
-       * Hands the module's `onPointer` listener one event, in the region's cells.
+       * The first element matching the query, outermost first in document
+       * order, or undefined.
        *
-       * @param event the event: `{ type: "down", x: 3, y: 0, button: "left" }`
+       * @param query tag, key and shown text to match; `in` to search a Client
+       * @returns the element's description, or undefined when none matches
+       * @example
+       * expect((await ui.find({ key: 'count' }))?.text).toBe('3 notes')
        */
-      pointer: (event: ClientPointerEvent) => Promise<void>;
+      find: (query: ElementQuery) => Promise<FoundElement | undefined>;
       /**
-       * Posts as the module's own `surface.post(data)` does: the plugin's
-       * `ui.message` hooks run with `e.data`.
+       * Every element matching the query, in document order.
        *
-       * A `{ props }` they answer reaches the instance, which redraws with its
-       * state kept.
+       * @param query tag, key and shown text to match; `in` to search a Client
+       * @returns the matching elements' descriptions
+       * @example
+       * expect(await ui.findAll({ type: 'Button' })).toHaveLength(2)
+       */
+      findAll: (query: ElementQuery) => Promise<FoundElement[]>;
+      /**
+       * Presses the Button keyed `key`, as the person activating it on this
+       * surface does: the `ui.press` chain, the Button's own `onPress` last.
+       *
+       * `e.surface` is this drawing's. With `link`, presses that link of the
+       * Markdown keyed `key` instead. A Button a `Client`'s module drew is
+       * pressed the same way, by its key.
+       *
+       * @param target the key; another plugin's name to press its Button; a link
+       * @returns what the chain settled on
+       * @example
+       * await ui.press({ key: 'save' })
+       */
+      press: (target: MountPressTarget) => Promise<UiPressResult | undefined>;
+      /**
+       * Types into the Input keyed `key`: the `ui.input` chain with the text as
+       * `e.value`, the Input's own handler last.
+       *
+       * `kind` `submit` (the default) is Enter with that text, `change` an edit
+       * that leaves it in the field.
+       *
+       * @param target the key and the text; `kind`; another plugin's name
+       * @returns what the chain settled on
+       * @example
+       * await ui.input({ key: 'title', text: 'groceries' })
+       */
+      input: (target: MountInputTarget) => Promise<UiInputResult | undefined>;
+      /**
+       * Picks `value` in the Select keyed `key`: the `ui.select` chain, the
+       * Select's own `onSelect` last.
+       *
+       * @param target the key and the option's value; another plugin's name
+       * @returns what the chain settled on
+       * @example
+       * await ui.select({ key: 'sort', value: 'date' })
+       */
+      select: (target: MountSelectTarget) => Promise<UiSelectResult | undefined>;
+      /**
+       * Hands a `Client`'s `onKey` listener one key, as a key pressed while
+       * its region has the focus does.
+       *
+       * `in` names the `Client` by key; optional when the drawing holds one.
+       *
+       * @param event the key (`{ key: 'right' }`, `{ key: 'a', ctrl: true }`)
+       * @example
+       * await ui.key({ key: 'return', in: 'board' })
+       */
+      key: (event: MountKeyEvent) => Promise<void>;
+      /**
+       * Hands a `Client`'s `onPointer` listener one event, in the cells of its
+       * region as every surface that draws a `Client` reports them.
+       *
+       * @param event the event (`{ type: 'down', x: 3, y: 0, button: 'left' }`)
+       * @example
+       * await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left' })
+       */
+      pointer: (event: MountPointerEvent) => Promise<void>;
+      /**
+       * Posts as a `Client`'s own `surface.post(data)` does: the plugin's
+       * `ui.message` hooks run with `e.data`, `e.surface` this drawing's.
+       *
+       * A `{ props }` they answer reaches the instance, which redraws with
+       * its state kept.
        *
        * @param data plain data (JsonValue)
+       * @param scope `{ in }`: which `Client`, when the drawing holds several
+       * @example
+       * await ui.post({ pick: 2 })
        */
-      post: (data: JsonValue) => Promise<void>;
+      post: (data: JsonValue, scope?: ClientScope) => Promise<void>;
       /**
-       * Moves the instance's frame clock on: each `surface.every(ms, fn)` timer
-       * fires at every interval of its own the move crosses.
+       * Moves the drawing's frame clock on: each `surface.every(ms, fn)` timer
+       * of its `Client`s fires at every interval of its own the move crosses.
        *
        * @param ms how far, in milliseconds
+       * @example
+       * await ui.advance(250)
        */
       advance: (ms: number) => Promise<void>;
       /**
-       * Lets the region go, as the tree dropping the `Client` does: the instance
-       * and its timers end.
+       * Lays a `Client`'s region out at a size, as the surface measuring it
+       * does: what its module reads as `surface.columns` and `surface.rows`.
+       *
+       * @param size cells across and down; `in`: which `Client`
+       * @example
+       * await ui.resize({ columns: 40, rows: 3 })
+       */
+      resize: (size: MountResizeTarget) => Promise<void>;
+      /**
+       * Draws the instance again, as the engine does when its props change (a
+       * tool row's output arrived): the `ui.render` chain with the next props.
+       *
+       * A plugin's own `$.ui.invalidate` needs no call: the drawing follows it
+       * before the next read.
+       *
+       * @param props the component's next props; the current ones when absent
+       * @example
+       * await ui.redraw({ ...TOOL_ROW, isRunning: false, output: 'done' })
+       */
+      redraw: (props?: RenderPropsOf[C]) => Promise<void>;
+      /**
+       * Lets the drawing go, as the surface dropping the instance does: its
+       * `Client`s and their timers end. Later acts on the handle reject.
+       *
+       * @example
+       * await ui.unmount()
        */
       unmount: () => Promise<void>;
   };
 
   /**
-   * What `$.ui.mount` takes: whose `Client`, the `key` its hook gave it, the
-   * drawing when it drew several, and the region's size in cells.
+   * What a mounted drawing's `input` takes: the Input's key, the text, which
+   * of the two inputs it is (`submit` when unsaid), another plugin's name.
    */
-  export type MountTarget = {
+  export type MountInputTarget = {
+      key: string;
+      text: string;
+      kind?: UiInputArgument['kind'];
+      plugin?: string;
+  };
+
+  /**
+   * What a mounted drawing's `key` takes: the key as a `Client`'s `onKey`
+   * listener receives it (ClientKeyEvent), and which `Client` when several.
+   */
+  export type MountKeyEvent = ClientKeyEvent & ClientScope;
+
+  /**
+   * What a mounted drawing's `pointer` takes: the event as a `Client`'s
+   * `onPointer` listener receives it, in its region's cells, and which one.
+   */
+  export type MountPointerEvent = ClientPointerEvent & ClientScope;
+
+  /**
+   * What a mounted drawing's `press` takes: the Button's key, another
+   * plugin's name when the Button is not the mounted plugin's, a link.
+   */
+  export type MountPressTarget = {
+      key: string;
+      plugin?: string;
       /**
-       * Whose `ui.render` hook drew the `Client`, by plugin name.
+       * Presses this link of the Markdown keyed `key` instead of a Button.
+       */
+      link?: PressedLink;
+  };
+
+  /**
+   * What a mounted drawing's `resize` takes: a `Client` region's size in
+   * cells, as the surface measuring it hands it, and which `Client`.
+   */
+  export type MountResizeTarget = {
+      columns: number;
+      rows: number;
+      in?: string;
+  };
+
+  /**
+   * What a mounted drawing's `select` takes: the Select's key, the picked
+   * option's value, another plugin's name when the Select is not its own.
+   */
+  export type MountSelectTarget = {
+      key: string;
+      value: string;
+      plugin?: string;
+  };
+
+  /**
+   * What `$.ui.mount` takes: whose elements the test will act on, the surface
+   * that draws, and the component instance the engine asks the plugins for.
+   *
+   * The envelope a `ui.render` hook sees as `e` (`surface`, `component`,
+   * `requestId`, `viewport`, `props`) plus `plugin`. `surface` is never
+   * defaulted: one body run over several surfaces is what shows independence.
+   *
+   * @example
+   * $.ui.mount({ plugin: 'notes', surface, component: 'Pane', props: PANE })
+   */
+  export type MountTarget<P extends RenderSurface = RenderSurface, C extends RenderComponent = RenderComponent> = {
+      /**
+       * Whose elements the handle's acts address by bare `key`: the plugin
+       * under test, usually. An act names another plugin to reach its element.
        */
       plugin: string;
       /**
-       * What the hook keyed the `Client` (`<Client key="board" ... />`).
+       * What draws: its element table validates every tree the plugins
+       * return, and every dispatch the handle raises carries it as `e.surface`.
+       *
+       * One of `terminal`, `desktop`, `vscode`, `mobile`.
        */
-      key: string;
+      surface: P;
       /**
-       * Which drawing holds it, by the render input's `requestId`; needed only
-       * when the plugin drew a `Client` under this key in more than one.
+       * Which component the engine asks the plugins to draw (`Pane`,
+       * `AbovePrompt`, `ToolUse`, ...): what a `ui.render` matcher narrows on.
+       */
+      component: C;
+      /**
+       * The component's props, what the hook reads as `e.props`.
+       */
+      props: RenderPropsOf[C];
+      /**
+       * The instance drawn (a pane's id, a tool row's tool_use_id); one is
+       * minted when absent. Two mounts of one component are two instances.
        */
       requestId?: string;
       /**
-       * The region's width in cells, what `surface.columns` reads; 80 if absent.
+       * What the surface measured, as the hook reads it under `e.viewport`;
+       * absent when the surface has not measured, as on `e`.
+       *
+       * Cells across and down in the surface's monospace metric and whether it
+       * docks a pane. A `Client` in the drawing starts laid out at this size
+       * (0 by 0 when absent) until the handle's `resize` lays its region out.
        */
-      columns?: number;
-      /**
-       * The region's height in cells, what `surface.rows` reads; 24 if absent.
-       */
-      rows?: number;
+      viewport?: RenderViewport;
   };
 
   /**
@@ -11093,12 +12098,23 @@ declare module 'claude-code/testing' {
 
   /**
    * What `$.ui.press` takes: the plugin whose `ui.render` hook drew the element,
-   * the `key` it gave it, the instance when several, and a Markdown's `link`.
+   * the `key` it gave it, the instance and surface when several, a `link`.
    */
   export type PressTarget = {
       plugin: string;
       key: string;
+      /**
+       * Which instance holds it, when the plugin drew the key in several.
+       */
       requestId?: string;
+      /**
+       * Which surface's drawing, when the key is drawn on more than one; the
+       * press carries the surface of the drawing it lands in either way.
+       */
+      surface?: RenderSurface;
+      /**
+       * For a Markdown answering its links: which of them the press lands on.
+       */
       link?: PressedLink;
   };
 
@@ -11215,7 +12231,7 @@ declare module 'claude-code' {
       limit?: number
       /** list: which listing to return. 'mine' is the default. The others are 'shared', 'all', 'types', 'files' (with `url`) and 'assets' (with `url`, continued with `after`). See **Calls**. */
       scope?: "mine" | "shared" | "all" | "types" | "files" | "assets"
-      /** list with scope 'types' only: limits the listing to types whose title or description contains this text, ignoring case. Omitting it lists them all. */
+      /** list with scope 'types' only: limits the listing to the types whose title or description match this text best, ignoring case; a type that matches less well is left out, so a narrowed listing is not the whole catalog. Claude omits it when choosing a type for a request, unless a listing made without it says more types exist than it shows. */
       type_query?: string
       /** list only: the name of a published Artifact type, as a 'types' listing shows it (case does not matter). The listing then shows the Artifacts made from that type instead of the person's gallery. Claude passes this or `type_url`, not both. */
       type?: string
@@ -11235,7 +12251,7 @@ declare module 'claude-code' {
       url?: string
       /** publish: the Artifact type to create this new, private Artifact from (a link from a 'types' listing). Claude omits `url`. Any `file_path`/`files` passed become the new Artifact's own files beside the type's fixed ones. read (no `url`): the type to describe. list: the type whose Artifacts to list, or Claude names the type with `type` instead. */
       type_url?: string
-      /** Only with `type_url` and no `file_path`: when the new Artifact opens for the person. Claude passes "after_first_write" when it will fill the Artifact right after creating it with a files publish to its url, so the person does not first see it empty. The Artifact then opens on that first write. Otherwise Claude omits it, and the Artifact opens when created. */
+      /** Only with `type_url` and no `file_path`: when the new Artifact opens for the person. Claude passes "after_first_write" when it will fill the Artifact right after creating it with a files publish to its url, so the person does not first see it empty. The Artifact then opens on that first write. Otherwise Claude omits it, and the Artifact opens when created; Claude always omits it for a type whose content it writes through a connector, such as a Claude Docs document, since no publish or store write follows to open it. */
       auto_open?: "at_create" | "after_first_write"
       /** read, for an artifact shared with the person: what Claude needs from it, which steers the isolated summary. */
       prompt?: string
@@ -11615,14 +12631,6 @@ declare module 'claude-code' {
       /** Optional arguments for the skill */
       args?: string
     }
-    TaskOutput: {
-      /** The task ID to get output from */
-      task_id: string
-      /** Whether to wait for completion */
-      block: boolean
-      /** Max wait time in ms */
-      timeout: number
-    }
     TaskStop: {
       /** The ID of the background task to stop. Agent-team teammates and named background agents are also accepted by agent ID or name. */
       task_id?: string
@@ -11767,6 +12775,7 @@ declare module 'claude-code' {
     }
     Artifact: {
       created_from_type: true
+      already_created?: true
       url: string
       version: string
       path?: string
@@ -12493,6 +13502,7 @@ declare module 'claude-code' {
     }
     ArtifactComments: {
       created_from_type: true
+      already_created?: true
       url: string
       version: string
       path?: string
@@ -13219,6 +14229,7 @@ declare module 'claude-code' {
     }
     ArtifactData: {
       created_from_type: true
+      already_created?: true
       url: string
       version: string
       path?: string
@@ -14483,7 +15494,6 @@ declare module 'claude-code' {
       /** True when the sub-agent was launched in the background: `result` describes the launch, and the skill outcome arrives later as a task notification. */
       background?: boolean
     }
-    TaskOutput: unknown
     TaskStop: {
       /** Status message about the operation */
       message: string
