@@ -3,9 +3,34 @@ import { MIN_SECRET_LEN } from '../env'
 
 import { garble } from './garble'
 import type { Entry, Provenance } from './persist'
-import { walk } from './walk'
+import { isOpaque, walk } from './walk'
 
 const GARBLE_TRIES = 8
+
+/**
+ * A placeholder no substitution can match, so every pass sees the ORIGINAL
+ * text and never a replacement an earlier pass made.
+ *
+ * Both directions used to split/join an evolving string, which let a later
+ * candidate rewrite a substring of a fake just inserted. That is not the
+ * hypothetical it reads as: `garble` copies a rule's literal prefix verbatim,
+ * so once such a prefix is itself registered as a secret — one documentation
+ * line naming it does that — EVERY fake of that vendor contains it, and the
+ * round trip breaks deterministically for a dozen of the rules.
+ *
+ * NUL delimits because it occurs in no credential format and in no prose; a
+ * payload full of them is refused by MAX_STRING first.
+ * ponytail: text genuinely containing `\0<digits>\0` would collide. Use a
+ * per-call nonce if one ever turns up.
+ */
+const slot = (i: number) => `\u0000${i}\u0000`
+
+/** Replaces each slot with what the pass that made it set aside. */
+function fill(text: string, pending: readonly string[]): string {
+  let out = text
+  for (let i = 0; i < pending.length; i++) out = out.split(slot(i)).join(pending[i])
+  return out
+}
 
 /** Where a secret came from. Absent means it exists nowhere but this process. */
 export type EnvSource = { file: string; key: string }
@@ -203,8 +228,13 @@ export class Vault {
     // thrown away. `scan` already knows which rule matched while the context
     // is still there, so carrying that forward costs nothing extra.
     const candidates = new Map<string, string>()
-    for (const { value, rule } of scan(text, this.cfg)) {
-      if (value.length >= MIN_SECRET_LEN) candidates.set(value, rule)
+    // The scan is what a base64 blob has to be protected from: it guesses, so
+    // it can garble an image. The exact-match loop below guesses nothing, so
+    // it runs on every string whatever shape it has.
+    if (!isOpaque(text)) {
+      for (const { value, rule } of scan(text, this.cfg)) {
+        if (value.length >= MIN_SECRET_LEN) candidates.set(value, rule)
+      }
     }
     // Every secret the vault has ever seen stays a candidate, not just the
     // ones registered from a file. A value first caught by a context-bearing
@@ -216,6 +246,7 @@ export class Vault {
     }
 
     let out = text
+    const pending: string[] = []
     for (const secret of [...candidates.keys()].sort((a, b) => b.length - a.length)) {
       // A fake already in flight must never be masked a second time.
       if (this.#byMask.has(secret)) continue
@@ -227,9 +258,10 @@ export class Vault {
       if (parts.length === 1) continue
       this.#masked += parts.length - 1
       this.#count(secret, 'masked', parts.length - 1)
-      out = parts.join(fake)
+      out = parts.join(slot(pending.length))
+      pending.push(fake)
     }
-    return out
+    return fill(out, pending)
   }
 
   /** `text` with every fake in it restored to the secret it stands for. */
@@ -237,15 +269,17 @@ export class Vault {
     if (text === '' || this.#byMask.size === 0) return text
     this.#masksByLength ??= [...this.#byMask.keys()].sort((a, b) => b.length - a.length)
     let out = text
+    const pending: string[] = []
     for (const fake of this.#masksByLength) {
       const parts = out.split(fake)
       if (parts.length === 1) continue
       const secret = this.#byMask.get(fake)!
       this.#restored += parts.length - 1
       this.#count(secret, 'restored', parts.length - 1)
-      out = parts.join(secret)
+      out = parts.join(slot(pending.length))
+      pending.push(secret)
     }
-    return out
+    return fill(out, pending)
   }
 
   maskDeep<T>(value: T, where = 'unknown'): T {

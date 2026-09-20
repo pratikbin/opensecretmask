@@ -29,7 +29,7 @@ export function registerCompact(on: On, vault: Vault) {
     )
     if (masked === undefined) return { skip: SKIP }
     return next({ ...e, messages: masked })
-  })
+  }).catch(() => ({ skip: SKIP }))
 }
 
 /**

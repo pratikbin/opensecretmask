@@ -3,6 +3,8 @@ import type { On } from 'claude-code'
 import { guard } from '../policy/budget'
 import type { Vault } from '../vault'
 
+const DENY = 'osm: blocked. The subagent task could not be masked.'
+
 /**
  * The subagent boundary.
  *
@@ -30,7 +32,7 @@ export function registerAgentSpawn(on: On, vault: Vault) {
       () => undefined,
     )
     return masked === undefined
-      ? { deny: 'osm: blocked. The subagent task could not be masked.' }
+      ? { deny: DENY }
       : next({ ...e, ...masked })
-  })
+  }).catch(() => ({ deny: DENY }))
 }

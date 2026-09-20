@@ -25,7 +25,7 @@ export function registerSessionStart(on: On, vault: Vault, options: Options) {
     const registered = await loadEnvSecrets($, vault, e.cwd, options.envFiles)
 
     if (options.persist && vault.size > restored) {
-      await save(portOf($), vault.entries())
+      await save(portOf($), vault.entries(), options.retentionDays)
     }
 
     // Fire and forget: a refused registration costs the command, not the

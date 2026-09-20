@@ -51,7 +51,13 @@ export function isOpaque(s: string): boolean {
  */
 export function walk<T>(value: T, fn: (s: string) => string, depth = 0): T {
   if (typeof value === 'string') {
-    if (value.length > MAX_STRING || isOpaque(value)) return value
+    // `isOpaque` no longer gates this. Skipping a payload skipped BOTH of
+    // mask()'s passes, and only the scan pass has false positives to protect
+    // a blob from; the exact-match pass cannot fire on a string that does not
+    // already contain a registered secret. A 6KB whitespace-free log line
+    // carrying a known credential reached the model verbatim. mask() now
+    // decides for itself whether to scan; see Vault.mask.
+    if (value.length > MAX_STRING) return value
     return fn(value) as T
   }
   if (depth >= MAX_DEPTH) return value

@@ -43,7 +43,7 @@ export function registerPrompt(on: On, vault: Vault) {
     const line = statusLine(vault.stats)
     if (line) $.ui.status(line)
     return next({ ...e, ...masked })
-  })
+  }).catch(() => ({ drop: DROP }))
 
   // A skill's own text, which `prompt.context` never sees.
   on('skill.prompt', ($, e, next) => {
@@ -51,7 +51,7 @@ export function registerPrompt(on: On, vault: Vault) {
     // means handing back the empty one rather than the unmasked one.
     const text = guard(() => vault.mask(e.text, `skill:${e.skill}`), () => '')
     return next({ ...e, text })
-  })
+  }).catch(($, e, next) => next({ ...e, text: '' }))
 
   // Queued, transcribed and read by the model, all without `prompt.submit`.
   on('session.receive', ($, e, next) => {
@@ -61,7 +61,7 @@ export function registerPrompt(on: On, vault: Vault) {
     )
     if (text === undefined) return { consumed: CONSUMED }
     return next({ ...e, text })
-  })
+  }).catch(() => ({ consumed: CONSUMED }))
 
   on('prompt.context', async ($, e, next) => {
     const { blocks } = await next(e)
@@ -69,7 +69,7 @@ export function registerPrompt(on: On, vault: Vault) {
       () => ({ blocks: blocks.map((b) => ({ ...b, text: vault.mask(b.text, 'prompt.context') })) }),
       () => ({ blocks: [] }),
     )
-  })
+  }).catch(() => ({ blocks: [] }))
 
   on('prompt.section', async ($, e, next) => {
     const { text } = await next(e)
@@ -77,5 +77,5 @@ export function registerPrompt(on: On, vault: Vault) {
       () => ({ text: typeof text === 'string' ? vault.mask(text, 'prompt.section') : text }),
       () => ({ text: null }),
     )
-  })
+  }).catch(() => ({ text: null }))
 }

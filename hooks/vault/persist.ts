@@ -187,10 +187,21 @@ export async function load(
  * was ever on disk", which would silently drop every entry a concurrent
  * session has written. The next tool call retries.
  */
-export async function save(port: PersistPort, entries: readonly Entry[]): Promise<void> {
+export async function save(
+  port: PersistPort,
+  entries: readonly Entry[],
+  retentionDays: number,
+  now: number = Date.now(),
+): Promise<boolean> {
   try {
     const raw = (await port.get(STORE_KEY)) as Partial<Snapshot> | undefined
-    const disk = raw?.version === 1 && Array.isArray(raw.entries) ? raw.entries.filter(isEntry) : []
+    const onDisk =
+      raw?.version === 1 && Array.isArray(raw.entries) ? raw.entries.filter(isEntry) : []
+    // Retention is a property of the durable state, not of one read. Pruning
+    // only in `load()` filtered a local variable and then wrote every expired
+    // literal straight back, so a secret stayed at rest for as long as the
+    // file did however short the window said it was.
+    const disk = prune(onDisk, retentionDays, now)
 
     const merged = new Map<string, Entry>()
     for (const e of disk) merged.set(identityKey(e), e)
@@ -202,8 +213,11 @@ export async function save(port: PersistPort, entries: readonly Entry[]): Promis
 
     await port.set(STORE_KEY, { version: 1, entries: [...merged.values()] } satisfies Snapshot)
     known = new Set(merged.keys())
+    return true
   } catch {
     // Store full, disk read-only, engine refused, or the read above failed.
-    // The session continues; the next save retries.
+    // The session continues. The caller must not advance its own "saved" mark
+    // on a false, or the next call reads as "nothing new" and never retries.
+    return false
   }
 }

@@ -46,11 +46,20 @@ export function registerToolCall(on: On, vault: Vault, options: Options) {
     if (line) $.ui.status(line)
 
     if (options.persist && vault.size !== savedSize) {
-      savedSize = vault.size
-      void save(portOf($), vault.entries()).catch(() => undefined)
+      // Advanced only once the write has actually landed. Setting it up front
+      // meant one transient store failure read as "already saved" on every
+      // later call, and the vault usually stops growing, so persistence was
+      // silently off for the rest of the session.
+      const size = vault.size
+      void save(portOf($), vault.entries(), options.retentionDays).then((ok) => {
+        if (ok) savedSize = size
+      })
     }
     return masked
-  })
+    // Inline, and it has to be: the validator rejects a `.catch` on a stored
+    // registration, and a module it rejects loads no hooks at all, which looks
+    // exactly like the leak this handler exists to prevent.
+  }).catch(() => ({ deny: DENY_MASK }))
 }
 
 /** Built here, not imported: the hook validator follows `$` only within a file. */

@@ -157,7 +157,7 @@ console.log(`rules: ${RULES.length}\n`)
     set: async (_k: string, v: unknown) => { stored = v },
     readFile: async (p: string) => p === '/p/.env' ? 'DB_PASSWORD=hunter2-correct-horse-staple\n' : '',
   }
-  await save(port, entries)
+  await save(port, entries, 120)
   const resolved = await load(port, 120)
   ok('P env entry rebinds from .env', resolved.length === 1 && resolved[0].secret === 'hunter2-correct-horse-staple')
 
@@ -206,7 +206,7 @@ console.log(`rules: ${RULES.length}\n`)
     resetKnownStore()
     await load(port, 120) // seeds `known` with `gone`'s identity
     port.set('', snap([])) // another session purges it, out from under this one
-    await save(port, [gone]) // this session still holds it; save() must not restore it
+    await save(port, [gone], 120) // this session still holds it; save() must not restore it
     ok('RC a purge is not resurrected by a stale save', port.peek()!.entries.length === 0)
   }
 
@@ -218,7 +218,7 @@ console.log(`rules: ${RULES.length}\n`)
     const port = portOver(snap([known]))
     resetKnownStore()
     await load(port, 120)
-    await save(port, [known, fresh])
+    await save(port, [known, fresh], 120)
     const secrets = port.peek()!.entries.map((e: any) => e.secret)
     ok('RC a genuinely new entry is added', secrets.includes('hunter2-correct-horse-fresh'))
   }
@@ -232,7 +232,7 @@ console.log(`rules: ${RULES.length}\n`)
     resetKnownStore()
     await load(port, 120)
     port.set('', snap([mine, theirs])) // the other session adds its own entry
-    await save(port, [mine]) // this session never saw `theirs`
+    await save(port, [mine], 120) // this session never saw `theirs`
     const secrets = port.peek()!.entries.map((e: any) => e.secret)
     ok('RC a concurrent addition is not clobbered', secrets.includes('hunter2-correct-horse-theirs'))
   }
@@ -249,7 +249,7 @@ console.log(`rules: ${RULES.length}\n`)
       readFile: async () => '',
     }
     resetKnownStore()
-    await save(port, [])
+    await save(port, [], 120)
     ok('RC a read failure skips the save rather than erasing the store',
       (stored as any).entries.length === 1)
   }
@@ -520,6 +520,62 @@ console.log(`rules: ${RULES.length}\n`)
   ok('LG age never goes negative', age(now + 10_000, now) === '0s')
 
   ok('LG table row shows the age', secretsTable(v.ledger(), Date.now())[1]!.includes('ago)'))
+}
+
+// The seven verified review findings, each locked to the behaviour that failed.
+{
+  // FX retention applies to the durable state, not only to what load() returns.
+  const old = { kind: 'literal', fake: 'f', secret: 'S'.repeat(20), at: 0 }
+  let disk: any = { version: 1, entries: [old] }
+  const port = {
+    get: async () => disk,
+    set: async (_k: string, v: any) => { disk = v },
+    readFile: async () => '',
+  }
+  resetKnownStore()
+  await save(port, [], 30)
+  ok('FX save drops an expired literal from the store', disk.entries.length === 0)
+
+  resetKnownStore()
+  disk = { version: 1, entries: [{ ...old, at: Date.now() }] }
+  await save(port, [], 30)
+  ok('FX save keeps a literal inside the window', disk.entries.length === 1)
+
+  // FX a failed write must report it, so the caller does not mark it saved.
+  const dead = { get: async () => ({ version: 1, entries: [] }), set: async () => { throw new Error('full') }, readFile: async () => '' }
+  resetKnownStore()
+  ok('FX save reports a failed write', (await save(dead as any, [], 120)) === false)
+  resetKnownStore()
+  ok('FX save reports a successful write', (await save(port, [], 120)) === true)
+}
+
+{
+  // FX a fake that contains another registered secret must still round-trip.
+  // garble copies a rule's literal prefix, so a registered prefix is inside
+  // every fake of that vendor — the deterministic form of the cascade.
+  const v = new Vault()
+  const prefix = 'sk-proj-x'
+  const key = prefix + 'B'.repeat(40)
+  v.register(key)
+  v.register(prefix)
+  const text = `token=${key} and bare=${prefix}`
+  const masked = v.mask(text)
+  ok('FX cascading replacement does not corrupt a fake', !masked.includes(key) && v.unmask(masked) === text)
+}
+
+{
+  // FX an opaque payload no longer skips the exact-match pass.
+  const v = new Vault()
+  const key = 'sk-ant-api03-' + 'C'.repeat(40)
+  v.register(key)
+  const blob = 'Q'.repeat(5000) + key + 'Z'.repeat(500)
+  ok('FX a registered secret is masked inside an opaque string', !v.mask(blob).includes(key))
+  ok('FX an opaque string is still not scanned', isOpaque('Q'.repeat(5000)))
+}
+
+{
+  // FX a subagent's report is read by the parent's model.
+  ok('FX SubagentHandback keeps its fakes', isModelFacing('SubagentHandback', 'message'))
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

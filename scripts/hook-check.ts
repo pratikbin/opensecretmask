@@ -46,14 +46,26 @@ function seat(stored?: unknown, envFiles: Record<string, string> = {}, options: 
     clock: { sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)) },
     command: { register: async () => ({ command: 'osm-secrets' }) },
   }
-  // `on` takes an optional matcher between the name and the handler.
-  register((name: string, a: any, b?: Handler) => hooks.set(name, b ?? a), options)
+  // `on` takes an optional matcher between the name and the handler, and
+  // returns a Registration whose `.catch` the engine calls when the hook
+  // throws or overruns. Returning a bare Map here meant the harness could not
+  // see a `.catch` at all, which is why the fail-open gap went unnoticed.
+  const catches = new Map<string, Handler>()
+  register((name: string, a: any, b?: Handler) => {
+    hooks.set(name, b ?? a)
+    return { catch: (h: Handler) => catches.set(name, h) }
+  }, options)
   const fire = (name: string, e: any, world: (e: any) => any) => {
     const h = hooks.get(name)
     if (!h) throw new Error(`no handler for ${name}`)
     return h($, e, world)
   }
-  return { hooks, fire, logs, statuses }
+  const recover = (name: string, e: any, world: (e: any) => any) => {
+    const h = catches.get(name)
+    if (!h) throw new Error(`no catch handler for ${name}`)
+    return h($, e, world)
+  }
+  return { hooks, catches, fire, recover, logs, statuses }
 }
 
 ok('H all nine hooks registered', (() => {
@@ -249,6 +261,31 @@ ok('H all nine hooks registered', (() => {
     { trigger: 'manual', messages: [{ role: 'user', get text() { return boom() }, toolUses: [] }] },
     (e: any) => e)
   ok('C a compaction that cannot be masked is skipped', typeof done.skip === 'string' && done.messages === undefined)
+}
+
+// A hook the engine could not run at all must still answer for itself. Without
+// a .catch the engine treats it as absent and serves core's unmasked result,
+// which a throw anywhere outside guard() — $.ui.status, for one — reaches.
+{
+  const { catches, recover } = seat()
+  ok('X every masking hook installs a catch handler',
+    ['tool.call', 'agent.spawn', 'prompt.submit', 'prompt.context', 'prompt.section',
+      'skill.prompt', 'session.receive', 'session.compact'].every((n) => catches.has(n)))
+
+  const denied: any = await recover('tool.call', { tool: 'Bash', command: 'x' }, (e: any) => e)
+  ok('X a failed tool.call denies rather than serving the result', typeof denied.deny === 'string')
+
+  const dropped: any = await recover('prompt.submit', { text: KEY }, (e: any) => e)
+  ok('X a failed prompt.submit drops the prompt', typeof dropped.drop === 'string')
+
+  const blocked: any = await recover('agent.spawn', { prompt: KEY, description: '' }, (e: any) => e)
+  ok('X a failed agent.spawn denies the subagent', typeof blocked.deny === 'string')
+
+  const empty: any = await recover('prompt.context', { blocks: [{ name: 'claudeMd', text: KEY }] }, (e: any) => e)
+  ok('X a failed prompt.context yields no blocks', Array.isArray(empty.blocks) && empty.blocks.length === 0)
+
+  const skipped: any = await recover('session.compact', { trigger: 'auto', messages: [] }, (e: any) => e)
+  ok('X a failed session.compact skips', typeof skipped.skip === 'string')
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

@@ -33,6 +33,11 @@ export const RESERVED = new Set(['tool', 'tool_use_id', 'agentId'])
 const KEEP_FAKES: Record<string, ReadonlySet<string>> = {
   Agent: new Set(['prompt', 'description']),
   AskUserQuestion: new Set(['questions']),
+  // A subagent's report is read by the parent's model, so this is the same
+  // boundary as `Agent` in the other direction and `agent.spawn` does not
+  // cover it. Observed leaking: the subagent emitted the fake, the parent
+  // transcript received the real credential.
+  SubagentHandback: new Set(['message', 'summary']),
 }
 
 /** Whether `key` on `tool` must keep its fakes instead of being restored. */
