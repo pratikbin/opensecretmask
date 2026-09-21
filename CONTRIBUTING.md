@@ -13,7 +13,7 @@ git clone https://github.com/pratikbin/opensecretmask
 cd opensecretmask
 bun run scripts/unit-check.ts
 bun run scripts/hook-check.ts
-npx --yes --package typescript@5 tsc -p tsconfig.json
+npx --yes --package typescript@7 tsc -p tsconfig.json
 ```
 
 There is no build step and no dependency to install. The hooks are TypeScript
@@ -119,7 +119,7 @@ Then run the checks:
 
 ```sh
 bun run scripts/unit-check.ts
-npx --yes --package typescript@5 tsc -p tsconfig.json
+npx --yes --package typescript@7 tsc -p tsconfig.json
 ```
 
 Use a fabricated value. Never put a real credential in a test, a commit or an
@@ -172,7 +172,7 @@ guards this.
 | --- | --- | --- |
 | `bun run scripts/unit-check.ts` | Detection, vault, `.env`, persistence, guards | bun |
 | `bun run scripts/hook-check.ts` | The six hooks, through a fake engine | bun |
-| `npx --yes --package typescript@5 tsc -p tsconfig.json` | Types | npx |
+| `npx --yes --package typescript@7 tsc -p tsconfig.json` | Types | npx |
 | `claude plugin validate .claude-plugin/plugin.json` | The engine accepts the module | Claude Code |
 | `bash scripts/local-e2e.sh` | One round trip against a real model | Claude Code, money |
 | `bash scripts/scenario-e2e.sh` | Every channel and the fail cases | Claude Code, tmux, jq, money |
@@ -181,8 +181,10 @@ guards this.
 The first four are the ones a pull request must pass. The last two cost real
 model calls, so run them when you change a hook rather than a rule.
 
-`npx typescript@5 tsc` fails with "could not determine executable to run". The
-package's bin is named `tsc`, so `--package` is required.
+`--package` is required: the package is `typescript`, its bin is `tsc`. Without
+it, npx reads `tsc` as a source file and TypeScript 7 answers `TS5042: Option
+'project' cannot be mixed with source files`. On TypeScript 5 the same mistake
+read "could not determine executable to run".
 
 ## Pull requests
 

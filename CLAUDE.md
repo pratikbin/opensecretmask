@@ -302,15 +302,17 @@ bun run scripts/unit-check.ts                          # 150 pure-logic checks
 bun run scripts/hook-check.ts                          # 35 hook-level checks
 bun run scripts/corpus-check.ts                        # our rules vs upstream fixtures
 bun run scripts/fetch-corpus.ts                        # refresh corpus/, needs network
-npx --yes --package typescript@5 tsc -p tsconfig.json  # NB: --package, see below
+npx --yes --package typescript@7 tsc -p tsconfig.json  # NB: --package, see below
 bash scripts/local-e2e.sh                              # real model, 3 passes
 bash scripts/scenario-e2e.sh                           # 11 scenarios in tmux, 25 checks
 bash scripts/sandbox-e2e.sh                            # real model, throwaway box
 bash scripts/wire-e2e.sh                               # what actually left the machine
 ```
 
-`npx typescript@5 tsc` fails with "could not determine executable to run" — the
-package's bin is `tsc`, not `typescript`. `--package` is required.
+`npx typescript@7 tsc` fails — the package's bin is `tsc`, not `typescript`, so
+npx reads `tsc` as a source file and tsc answers `TS5042: Option 'project'
+cannot be mixed with source files`. TypeScript 5 said "could not determine
+executable to run" instead. `--package` is required either way.
 
 `scripts/scenario-e2e.sh` also runs the fail cases, because a masker that
 breaks must break closed. `stale` gives the model a fake no vault has minted,

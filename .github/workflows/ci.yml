@@ -9,19 +9,21 @@ jobs:
   typecheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
       - name: Typecheck hooks
-        run: npx --yes --package typescript@5 tsc -p tsconfig.json
+        run: npx --yes --package typescript@7 tsc -p tsconfig.json
 
   checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2.2.0
       - name: Pure-logic checks
         run: bun run scripts/unit-check.ts
       - name: Hook-level checks
         run: bun run scripts/hook-check.ts
+      - name: Corpus checks
+        run: bun run scripts/corpus-check.ts

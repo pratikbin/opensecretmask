@@ -31,7 +31,7 @@ repos:
       # `--package` is required: the package's bin is `tsc`, not `typescript`.
       - id: typecheck
         name: typecheck
-        entry: npx --yes --package typescript@5 tsc -p tsconfig.json
+        entry: npx --yes --package typescript@7 tsc -p tsconfig.json
         language: system
         pass_filenames: false
         always_run: true
