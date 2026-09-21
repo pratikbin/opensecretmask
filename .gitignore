@@ -8,6 +8,9 @@ package.json
 .env.local
 .env.test
 
+# e2e fixtures — never commit
+secret*.txt
+
 # Local-only — not for git history
 .agents/
 .firecrawl/
