@@ -1,0 +1,31 @@
+name: Bug
+description: Anything else — a crash, a hook that does not load, a command that misbehaves.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Expected, observed, and how to get back there.
+    validations:
+      required: true
+  - type: textarea
+    id: checks
+    attributes:
+      label: Do the checks pass?
+      description: |
+        ```sh
+        bun run scripts/unit-check.ts
+        bun run scripts/hook-check.ts
+        ```
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: osm and Claude Code versions
+      placeholder: osm 0.1.0, Claude Code 2.1.272
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: macOS 15.3, arm64

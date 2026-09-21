@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a leak privately
+    url: https://github.com/pratikbin/opensecretmask/security/advisories/new
+    about: A secret reaching the model, the transcript, or a subagent. Do not open a public issue.

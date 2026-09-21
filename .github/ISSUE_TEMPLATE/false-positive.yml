@@ -1,0 +1,24 @@
+name: Something harmless was masked
+description: osm replaced a value that was not a secret, and it broke something.
+labels: [detection, false-positive]
+body:
+  - type: textarea
+    id: value
+    attributes:
+      label: What got masked
+      description: The value, or its shape if you would rather not say. A `${VAR}` reference, a UUID, a documented placeholder — paste it as it appeared.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: rule
+    attributes:
+      label: Which rule caught it
+      description: The `rule` column of `/osm-secrets`, if you can see the entry there.
+  - type: textarea
+    id: impact
+    attributes:
+      label: What broke
+      description: A masked value only matters when it changes what the model or a tool does. Say what went wrong.
+    validations:
+      required: true

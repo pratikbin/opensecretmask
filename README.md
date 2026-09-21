@@ -418,7 +418,7 @@ a timer: synchronous work cannot overrun a deadline it blocks.
 bun run scripts/unit-check.ts   # 150 checks on the pure logic
 bun run scripts/hook-check.ts   # 35 checks on the hooks, through a fake engine
 bun run scripts/corpus-check.ts # our rules against gitleaks, Nosey Parker and secretlint fixtures
-npx --yes --package typescript@5 tsc -p tsconfig.json
+npx --yes --package typescript@7 tsc -p tsconfig.json
 claude plugin validate .claude-plugin/plugin.json   # the engine must accept the hooks
 ```
 
@@ -493,8 +493,13 @@ New rules are the most useful contribution, and the bar is one rule, one line,
 one test. [CONTRIBUTING.md](CONTRIBUTING.md) has the anatomy of a rule, the
 prefix requirement, how to avoid false positives, and the checklist.
 
-If you find a way to make the plugin leak a credential, please open a GitHub
-issue with the shape of the input and not the real value.
+If you find a way to make the plugin leak a credential, report it privately
+through [Security Advisories](https://github.com/pratikbin/opensecretmask/security/advisories/new)
+rather than in a public issue. [SECURITY.md](SECURITY.md) says what counts and
+what to include. A missing rule for a vendor is a normal issue, not an advisory.
+
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies to every space this project
+uses.
 
 ## License
 
