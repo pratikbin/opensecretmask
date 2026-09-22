@@ -1,68 +1,61 @@
 # osm
 
-Keep your API keys out of the model, without breaking what the model can do.
+**Keep your API keys out of the model, without breaking what the model can do.**
 
-`osm` is a plugin for [Claude Code](https://claude.com/claude-code). It replaces
-each secret with a fake before Claude reads it, then puts the real secret back
-on the way into a tool call. Claude works with the fake. Your terminal works
-with the real value.
-
-```
-you       cat .env
-                                 ANTHROPIC_API_KEY=sk-ant-api03-Xk9Qw2…
-osm                              masks it
-Claude reads                     ANTHROPIC_API_KEY=sk-ant-nvd59-RATmp7…
-Claude writes                    curl -H "x-api-key: sk-ant-nvd59-RATmp7…"
-osm                              restores it
-your shell runs                  curl -H "x-api-key: sk-ant-api03-Xk9Qw2…"
-```
-
-A fake is **format-preserving**. It keeps the vendor prefix, the length and the
-character classes of the real value, so `sk-ant-api03-Xk9…` becomes
-`sk-ant-nvd59-RAT…`. This is the whole point of the project. An opaque
-`[REDACTED]` tag tells the model that something is missing and changes how it
-reasons. A same-shaped fake tells it "this is an Anthropic key", so it writes
-the same command it would have written anyway.
-
-Nothing of the plugin's own is written to disk by default. The map of fake to
-real value lives in memory and dies with the session. For the full account of
-what is stored where, read [Where your secrets live](#where-your-secrets-live).
+A [Claude Code](https://claude.com/claude-code) plugin. It swaps every secret
+for a format-preserving fake before Claude reads it, and puts the real value
+back on the way into a tool call.
 
 ![Installing osm, then watching Claude read a credential file and report a fake](.github/assets/osm-demo.gif)
 
-That is a real session, not a mock-up: the plugin is installed, a file holding
+A real session, not a mock-up: the plugin is installed, a file holding
 `sk-ant-api03-Kv8Tz2…` is written and `cat`-ed, and the model answers with a
-different 74-character key of the same shape. `/osm-secrets` at the end prints
-the pair. `scripts/record-demo.sh` records it, in a throwaway sandbox.
+*different* 74-character key of the same shape. `/osm-secrets` prints the pair.
+Recorded by [`scripts/record-demo.sh`](scripts/record-demo.sh).
 
-## Who this is for
+```mermaid
+flowchart LR
+    ENV["<b>.env</b> / tool output<br/>sk-ant-api03-Kv8Tz2…"]
+    MASK["<b>mask</b>"]
+    MODEL["<b>Claude</b><br/>sk-ant-bpc23-VpONd6…"]
+    REST["<b>restore</b>"]
+    SHELL["<b>your shell</b><br/>sk-ant-api03-Kv8Tz2…"]
+    VAULT[("vault<br/>fake ⇄ real")]
 
-- You paste credentials into a terminal where Claude Code is running.
-- Your `.env` file is one `cat` away from the conversation transcript.
-- You run agents that read logs, config files or HTTP responses that carry
-  tokens.
+    ENV --> MASK --> MODEL --> REST --> SHELL
+    MASK -.-> VAULT
+    VAULT -.-> REST
 
-If you never let a model see a credential in the first place, you do not need
-this.
+    classDef real fill:#1f6f43,stroke:#2ea16a,color:#fff
+    classDef fake fill:#7a4b16,stroke:#c98a3a,color:#fff
+    class ENV,SHELL real
+    class MODEL fake
+```
+
+## Why a fake and not `[REDACTED]`
+
+A fake keeps the vendor prefix, the length and the character classes of the
+real value: `sk-ant-api03-Xk9…` becomes `sk-ant-nvd59-RAT…`.
+
+`[REDACTED]` tells the model something is *missing* — it stops treating the
+value as an Anthropic key and starts treating it as a hole. A same-shaped fake
+preserves the plan, so the model writes the command it would have written
+anyway. This is the whole point of the project.
 
 ## Install
 
-You need Claude Code 2.1.272 or newer. Function hooks are an early-access
-feature, so you must set `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`.
+Needs Claude Code **2.1.272+**. Function hooks are early-access, so the flag is
+required.
 
 ```sh
 claude plugin marketplace add pratikbin/opensecretmask
 claude plugin install osm@opensecretmask
-```
 
-Then start Claude Code with the feature flag on:
-
-```sh
 CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude
 ```
 
-To run from a clone instead, which is what you want while you work on the
-plugin itself:
+<details>
+<summary>Running from a clone (for working on the plugin itself)</summary>
 
 ```sh
 git clone https://github.com/pratikbin/opensecretmask ~/.claude/osm
@@ -70,30 +63,30 @@ cd ~/your-project
 CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir ~/.claude/osm
 ```
 
-`--plugin-dir` takes the directory that holds `.claude-plugin/plugin.json`.
+`--plugin-dir` takes the directory holding `.claude-plugin/plugin.json`. The
+plugin key becomes `osm@inline`, which keeps its own settings and store file.
+
+</details>
 
 ## What you see
 
-One line when the session starts, naming what is watched and what is off:
+A masking plugin is otherwise silent, so it reports three things.
+
+**At session start** — what is watched, and what is off:
 
 ```
 osm: masking (2 secrets from .env, .env.local, 146 rules, entropy on)
-osm: masking on, nothing registered (146 rules)
 ```
 
-Then a line pinned under the prompt, which is how you know it is working while
-you work. A masking plugin is otherwise silent by design:
+**Pinned under the prompt** — the round trip actually closing. `masked` counts
+values swapped on the way to the model, `restored` counts fakes swapped back on
+the way into a tool. Before anything is found it reads `osm: watching`.
 
 ```
 osm: 3 secrets · 12 masked · 4 restored
 ```
 
-`masked` counts values swapped on the way to the model and `restored` counts
-fakes swapped back on the way into a tool, so the second number is the round
-trip actually closing. Before anything is found the line reads `osm: watching`.
-
-And `/osm-secrets`, which prints the pairs: every secret the session has
-masked, beside the fake it wears.
+**`/osm-secrets`** — every secret this session, beside the fake it wears:
 
 ```
 osm: 3 secrets this session (real → fake)
@@ -102,112 +95,117 @@ osm: 3 secrets this session (real → fake)
 3. -----BEGIN•••Y----- (72) → -----BEGIN•••K----- (72)  Private Key · Read  (2d ago)
 ```
 
-One bounded line per secret, not a column table: a PEM key carries newlines and
-a JWT runs to 300 characters, so aligned columns come apart the moment a real
-session has thirty secrets in it. Both values keep their ends, lose the middle
-and state their true length, which is enough to match a row against your `.env`
-without printing the credential whole. The rule and the channel come after —
-a tool name (`Bash`, `Read`) for a value caught on its way out, or the
-`.env` file and key for one registered at session start — followed by how
-long ago it was first seen. The list goes out through the engine's
-user-only log channel, so **the model never receives it** — printing it as the command's own output would hand the model
-every fake beside its original, which is the leak the plugin exists to prevent.
-It is still on your screen and in the debug log, so treat a shared terminal
-recording accordingly.
+Each value keeps its ends and states its true length — enough to match a row
+against your `.env` without printing the credential. Then the rule, then the
+origin: a tool name, or `file:key` for a session-start registration.
+
+> **The model never receives this list** — it goes out through the engine's
+> user-only log channel. It *is* on your screen and in the debug log, so treat
+> a shared terminal recording accordingly.
 
 ## How it works
 
 Claude Code exposes function hooks at each boundary where text moves between
-you, the model and the outside world. `osm` sits on seven of them.
+you, the model and the outside world. `osm` sits on ten of them.
+
+```mermaid
+flowchart LR
+    TOOLS["Read · Bash · Grep<br/>WebFetch · Write · MCP"] -->|tool.call ↑| MODEL
+    PROMPT["what you type"] -->|prompt.submit| MODEL
+    CTX["CLAUDE.md · memory"] -->|prompt.context<br/>prompt.section| MODEL
+    DISK["skill bodies"] -->|skill.prompt| MODEL
+    RELAY["relay · peer<br/>Remote Control"] -->|session.receive| MODEL
+    PAST["the transcript"] -->|session.compact| MODEL
+
+    MODEL(["Claude<br/><i>sees fakes only</i>"])
+
+    MODEL -->|tool.call ↓<br/><b>restore</b>| OUT["your shell<br/>the real value"]
+    MODEL -->|agent.spawn<br/><b>stays fake</b>| SUB(["subagent"])
+
+    ENVF[".env at startup"] -.->|session.start| V[("vault")]
+
+    classDef m fill:#7a4b16,stroke:#c98a3a,color:#fff
+    classDef r fill:#1f6f43,stroke:#2ea16a,color:#fff
+    class MODEL,SUB m
+    class OUT r
+```
 
 | Hook | Direction | Action |
 | --- | --- | --- |
-| `session.start` | none | Registers credentials from the session's `.env` files |
-| `tool.call` down | model to world | Restores fakes in tool arguments |
-| `tool.call` up | world to model | Masks secrets in `result`, `text` and `context` |
-| `prompt.submit` | you to model | Masks the prompt you typed and its context blocks |
-| `prompt.context` | files to model | Masks `claudeMd`, where instruction files land |
-| `prompt.section` | memory to model | Masks `memory` and the other prompt sections |
-| `agent.spawn` | model to model | Masks the task text handed to a subagent |
-| `skill.prompt` | disk to model | Masks a skill's expanded prompt |
-| `session.receive` | outside to model | Masks a relay, peer or Remote Control delivery |
-| `session.compact` | transcript to model | Masks what the summarizer reads at `/compact` |
+| `session.start` | — | Registers credentials from the session's `.env` files |
+| `tool.call` ↑ | world → model | Masks `result`, `text` and `context` |
+| `tool.call` ↓ | model → world | Restores fakes in tool arguments |
+| `prompt.submit` | you → model | Masks the prompt you typed |
+| `prompt.context` | files → model | Masks `claudeMd`, where instruction files land |
+| `prompt.section` | memory → model | Masks `memory` and the other sections |
+| `skill.prompt` | disk → model | Masks a skill's expanded prompt |
+| `session.receive` | outside → model | Masks a relay, peer or Remote Control delivery |
+| `session.compact` | transcript → model | Masks what the summarizer reads at `/compact` |
+| `agent.spawn` | model → model | Masks the task text handed to a subagent |
 
 One `tool.call` registration covers Read, Bash, Grep, WebFetch, Write, the
-Agent tool and every MCP tool, because it matches the event and not a list of
-tool names.
+Agent tool and every MCP tool — it matches the event, not a list of tool names.
 
-A value another model reads is not an external boundary. Restoring a fake is
-for a `Bash` command or a `Write`, never for a subagent's task text. Two layers
-hold that line: `agent.spawn` masks the task of every subagent dispatch
-whatever tool triggered it, and `policy/model-facing.ts` stops the real value
-appearing in the Agent tool's recorded arguments on the way there.
-
-### Diagrams
-
-Each PNG links to an interactive, self-contained HTML version — open it in a
-browser, no server needed.
-
-[![Module architecture](docs/diagrams/architecture.png)](docs/diagrams/architecture.html)
-
-`register.ts`'s wiring fan-out, the mask/restore core, and the vault's
-persistence path.
-
-[![Tool-call round trip](docs/diagrams/tool-call-sequence.png)](docs/diagrams/tool-call-sequence.html)
-
-`inbound()` restoring a fake before the real tool runs, `outbound()` masking
-the result after, both fail-closed.
-
-[![Vault lifetime](docs/diagrams/vault-lifecycle.png)](docs/diagrams/vault-lifecycle.html)
-
-What survives `/clear`, what a reload kills, and the `persist: true` recovery
-path.
+**A value another model reads is not an external boundary.** Restoring is for a
+`Bash` command or a `Write`, never for a subagent's task text. Two layers hold
+that line: `agent.spawn` masks every subagent dispatch whatever tool triggered
+it, and `policy/model-facing.ts` keeps the real value out of the Agent tool's
+recorded arguments on the way there.
 
 ## What it detects
 
-Two layers, and they work differently on purpose.
+Two layers, different on purpose.
 
-**Registered secrets** are the exact-match layer. At `session.start` the plugin
-reads the session's `.env` files. A value qualifies on its name (`*_KEY`,
-`*_TOKEN`, `*_PASSWORD`, and so on) or on its shape. So a credential with a
-dull name is still caught, and `PORT=3000` stays readable. This layer does not
-care what the secret looks like, which is why it catches
-`DB_PASSWORD=hunter2-correct-horse-battery-staple`.
+**Registered secrets — exact match.** At `session.start` the plugin reads the
+session's `.env` files. A value qualifies on its *name* (`*_KEY`, `*_TOKEN`,
+`*_PASSWORD`, …) or on its shape. So a credential with a dull name is caught,
+`PORT=3000` stays readable, and shapeless values like
+`DB_PASSWORD=zezyhd4-esvgwsw-islmz` are covered.
 
-**Detection rules** are the best-effort layer: 146 patterns in six groups under
-`hooks/detect/rules/`, covering about 96 vendors. There are no allowlists and
-no anchors, so a rule behaves the same in a JSON body, in file contents and in
-a bare token.
+**Detection rules — best effort.** 146 patterns in six groups under
+`hooks/detect/rules/`, covering about 96 vendors. No allowlists, no anchors, so
+a rule behaves the same in a JSON body, in file contents and in a bare token.
 
-Most rules are gated on a literal vendor prefix, such as `sk-ant-` or `ghp_`.
-Thirteen are shape or context rules, and those cover far more ground than a
-vendor count suggests:
+Most rules are gated on a literal vendor prefix (`sk-ant-`, `ghp_`). Thirteen
+are shape or context rules, and those cover far more ground than a vendor count
+suggests:
 
-- a credential in a URL or a connection string, such as `postgres://user:PASS@host`
-- an `Authorization: Bearer` header
-- an assignment such as `DD_API_KEY=…` or `aws_secret_access_key = "…"`
-- a PEM or PGP private key block, the whole block and not the header
-- a JSON Web Token (a signed `eyJ…` token)
+| Shape | Example |
+| --- | --- |
+| Credential in a URL | `postgres://user:PASS@host` |
+| Auth header | `Authorization: Bearer …` |
+| Assignment | `DD_API_KEY=…`, `aws_secret_access_key = "…"` |
+| Private key block | PEM or PGP, the whole block |
+| JWT | a signed `eyJ…` token |
 
 A context rule masks only its capture group, and that group is checked before
-it is trusted: surrounding quotes and commas are trimmed off, and a value that
-merely names a credential is dropped. `${DB_PASSWORD}`, `$ANTHROPIC_API_KEY`,
-`<your-key-here>`, `[MASKED-0001]`, `changeme`, a bare UUID and a regex source
-all stay readable. Plain hex and digits are not dropped: under an explicit
-credential name they are usually the real key.
+it is trusted — quotes and commas trimmed, and anything that merely *names* a
+credential dropped: `${DB_PASSWORD}`, `$ANTHROPIC_API_KEY`, `<your-key-here>`,
+`[MASKED-0001]`, `changeme`, a bare UUID, a regex source. Plain hex and digit
+runs are deliberately **not** dropped — under an explicit credential name they
+are usually the real key.
 
-So a vendor with no rule of its own is often still caught. A secret with no
-recognizable shape at all is the `.env` layer's job.
+A value caught once is remembered, so a secret first matched by a context rule
+is masked later when it appears on its own.
 
-A value caught once is remembered. A secret first matched by a context rule is
-masked later when it appears on its own.
-
-Adding a rule is one line in one file. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Adding a rule is one line in one file — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Configuration
 
-Set an option with `/config` inside Claude Code, or write it into
-`settings.json` under `pluginConfigs`:
+`/config` inside Claude Code, or `settings.json` under `pluginConfigs`. The
+plugin key is `osm`, or `osm@inline` under `--plugin-dir`.
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `entropy` | `false` | Shannon-entropy layer for tokens no pattern matches |
+| `entropyThreshold` | `4` | Bits per character above which a string counts as random |
+| `entropyMinLen` | `24` | Shortest string the entropy layer considers |
+| `envFiles` | `.env`, `.env.local` | Files the exact-match layer reads at session start |
+| `persist` | `true` | Carries the map across a resume, a fork or `/reload-plugins` |
+| `retentionDays` | `120` | How long a stored **literal** secret survives |
+
+<details>
+<summary>The same thing as JSON</summary>
 
 ```json
 {
@@ -226,284 +224,206 @@ Set an option with `/config` inside Claude Code, or write it into
 }
 ```
 
-The values above are the defaults. The plugin key is `osm`, or `osm@inline`
-when you load it with `--plugin-dir`.
-
-| Option | Default | What it does |
-| --- | --- | --- |
-| `entropy` | `false` | Adds a Shannon-entropy layer for tokens that no pattern matches |
-| `entropyThreshold` | `4` | Bits per character above which a string counts as random |
-| `entropyMinLen` | `24` | Shortest string the entropy layer will consider |
-| `envFiles` | `.env`, `.env.local` | Which files the exact-match layer reads at session start |
-| `persist` | `true` | Carries the map across a resume, a fork or `/reload-plugins` |
-| `retentionDays` | `120` | How long a stored literal secret survives |
-
-Those defaults are declared in `.claude-plugin/plugin.json` and mirrored in
+Defaults are declared in `.claude-plugin/plugin.json` and mirrored in
 `hooks/options.ts`; a check asserts the two agree, because for a while they did
 not and `persist` behaved one way in development and another once installed.
 
-`entropy` catches vendors that have no rule, such as an Atlassian token or an
-Azure storage key. It costs precision: it will mask a long random-looking path
-inside an ordinary URL. It runs behind the suppression set in
+</details>
+
+**On `entropy`:** it catches vendors with no rule — an Atlassian token, an
+Azure storage key — and costs precision, since it will mask a long
+random-looking path inside an ordinary URL. It runs behind
 `hooks/detect/suppress.ts`, which keeps git SHAs, UUIDs, digit runs and public
-object ids (Stripe `pk_` and `price_`, YouTube channel ids) out of the results
-unless a credential name sits immediately to their left. Turn it on when you
-would rather over-mask than miss something.
+object ids (Stripe `pk_`, YouTube channel ids) out of the results unless a
+credential name sits immediately to their left. Turn it on when you would
+rather over-mask than miss something.
 
 ## Where your secrets live
 
-By default `osm` stores nothing. The map of fake to real value is a `Map` in
-the plugin's memory, for one load of the plugin. It is never written anywhere,
-and it dies with the session. Your real secrets stay where they already were:
-in `.env`, in the output of a tool, in your shell.
+**By default, `osm` stores nothing.** The map is a `Map` in memory, for one load
+of the plugin. Your real secrets stay where they already were.
 
-Three places hold a real credential while you use the plugin. Only the first is
-the plugin's own.
-
-### 1. The vault, in memory
-
-`hooks/vault/index.ts`. Two maps, secret to fake and fake back to secret. No
-file, no keychain, no network, no encryption, because there is nothing at rest
-to encrypt. A `/clear` or a `/compact` keeps it. A reload, a fork or a
-`--resume` starts an empty one, which is why an old fake no longer restores.
-
-### 2. The store, only when `persist` is on
-
-`persist: true` writes the map through `$.store`, which is a plain JSON file:
-
-```
-~/.claude/plugins/store/osm_inline-<hash>.json      mode 644
-~/.claude/plugins/store/                            mode 755
+```mermaid
+stateDiagram-v2
+    [*] --> Live: session starts
+    Live: vault in memory<br/>fake ⇄ real
+    Live --> Live: /clear · /compact (kept)
+    Live --> Dead: reload · fork · --resume
+    Dead: new empty vault<br/>old fakes no longer restore
+    Dead --> Live: persist true → restores from $.store
+    Dead --> [*]: persist false
 ```
 
-The file name carries the plugin key, so an installed `osm` and a
-`--plugin-dir` `osm@inline` keep separate files. Measured on a fresh box: 497
-bytes for two entries.
+"Old fakes no longer restore" means the model writes a stale fake into a tool
+call, the hook does not recognise it, and the tool receives the fake. The
+command fails against an invalid credential — safe for privacy, wrong for
+usability. That is what `persist` fixes.
 
-Entries come in two kinds, and the split is the point:
+Three places hold a real credential. Only the first two are the plugin's.
+
+**1. The vault, in memory.** `hooks/vault/index.ts`. Two maps. No file, no
+keychain, no network, no encryption — nothing at rest to encrypt.
+
+**2. The store, only when `persist` is on.** Plain JSON at
+`~/.claude/plugins/store/osm_<key>-<hash>.json`, mode `644` in a `755`
+directory; 497 bytes for two entries.
 
 | Kind | Stored | Expires |
 | --- | --- | --- |
-| `env` | the fake plus a pointer to `{file, key}` | never, because the source is re-read |
+| `env` | the fake plus a pointer to `{file, key}` | never — the source is re-read |
 | `literal` | the fake **and the secret** | after `retentionDays` |
 
-A `.env` secret is already on your disk, so storing a pointer to it puts
-nothing new at rest. A secret first seen in tool output exists nowhere else, so
-restoring it later means storing the value itself. That is the only kind that
-creates new exposure, and the only kind the retention window applies to. A run
-that registered one of each confirmed it: the `.env` password does not appear
-in the file, the literal one does.
+A `.env` secret is already on disk, so a pointer puts nothing new at rest. A
+secret first seen in tool output exists nowhere else — restoring it later means
+storing the value. That is the only kind that creates new exposure, and the
+only kind `retentionDays` applies to.
 
-**The file is world-readable and the plugin cannot change that.** `$.fs` has no
-chmod, and the engine writes the file with mode 644. Anyone with an account on
-the machine can read it.
+> **The file is world-readable and the plugin cannot change that.** `$.fs` has
+> no chmod and the engine writes mode `644`. Tighten the directories instead.
 
-### 3. The session transcript, which the engine owns
+**3. The session transcript, which the engine owns.**
+`~/.claude/projects/<slug>/<session-id>.jsonl`, mode `600`. Mostly fakes, since
+that is what the model saw. Two record types still carry the real value, both
+confirmed by grepping this project's own test transcripts:
 
-```
-~/.claude/projects/<slugged-cwd>/<session-id>.jsonl   mode 600
-~/.claude/projects/                                   mode 755
-```
+- `attachment` / `hook_success` — a classic hook's stdout, verbatim. A
+  `PreToolUse` hook that echoes what it rewrote lands the credential here.
+- `queue-operation` / `enqueue` — your prompt as typed, written *before*
+  `prompt.submit` runs. The model gets the fake; the disk keeps what you typed.
 
-Masked values are what the model saw, so the transcript is mostly fakes. Two
-records can still carry the real value, and both were confirmed by grepping
-real transcripts from this project's own test runs:
-
-- `type: "attachment"` with `attachment.type: "hook_success"`. A classic hook's
-  stdout, recorded verbatim. If you run a `PreToolUse` hook that echoes the
-  command it rewrote, the restored credential lands here.
-- `type: "queue-operation"` with `operation: "enqueue"`. The prompt exactly as
-  you typed it, written before `prompt.submit` masking runs. The model receives
-  the fake. The disk keeps what you typed.
-
-So a secret you paste into a prompt is masked for the model and still written
-to the transcript. That is the engine's record of your input, not something a
-hook can rewrite.
-
-## Hardening this on a Mac
+## Hardening on a Mac
 
 In order of how much they buy you.
 
-**Turn `persist` off.** It ships on, because a map that dies with the plugin
-load breaks `--resume`, a fork and `/reload-plugins`, and the usual entry is
-env-backed and stores no secret. Off, nothing of the plugin's own reaches the
-disk and the only remaining exposure is the transcript, which you have with or
-without this plugin. On, a `literal` entry — a secret first seen in tool output
-— is written in plaintext for `retentionDays`.
-
-**Tighten the directories, which is durable.** The engine rewrites the store
-file and resets its mode, but it does not touch the mode of the directories
-above it:
-
 ```sh
+# 1. Tighten the directories — durable; the engine resets file modes, not these
 chmod 700 ~/.claude ~/.claude/projects ~/.claude/plugins/store
-```
 
-A `700` directory stops another account on the Mac from reaching the files
-inside it, whatever mode the files carry.
-
-**Turn on FileVault.** System Settings, Privacy and Security, FileVault. It
-protects `~/.claude` when the Mac is off or stolen. It does nothing while you
-are logged in, which is the point of the directory modes above.
-
-**Keep the transcripts out of backups you do not control.**
-
-```sh
+# 2. Keep transcripts out of backups you do not control
 tmutil addexclusion ~/.claude/projects
-```
 
-Do the same for any cloud-sync folder. A transcript copied into a synced
-directory is a credential copied into someone else's storage.
-
-**Shorten the window and clean up.** `retentionDays` bounds how long a literal
-secret survives. Deleting the store file is safe at any time: the plugin
-rebuilds what it can from `.env` and simply mints new fakes for the rest.
-
-```sh
+# 3. Deleting the store is safe at any time — .env entries rebuild, the rest re-mint
 rm -f ~/.claude/plugins/store/osm_*.json
 ```
+
+**Turn `persist` off** if you want nothing of the plugin's own on disk. It ships
+on because a map that dies with the plugin load breaks `--resume`, a fork and
+`/reload-plugins`, and the usual entry is env-backed and stores no secret.
+
+**Turn on FileVault** — it protects `~/.claude` when the Mac is off or stolen,
+and does nothing while you are logged in, which is what the directory modes
+above are for.
 
 **Rotate what has already been in a transcript.** No file mode retroactively
 protects a credential that sat in a `.jsonl` on a shared or backed-up disk.
 
-## What this does not protect against
-
-Read this part before you rely on the plugin.
-
-- **A tool you run with the real credential.** Restoring is the feature. If
-  Claude writes a command that ships the value to a third party, it ships the
-  real one.
-- **A secret that no layer recognizes.** If it is not in `.env`, matches no
-  rule, and entropy is off, the model reads it.
-- **A malicious prompt in a file the model reads.** `osm` masks credentials. It
-  is not a prompt-injection defense.
-- **Anything outside Claude Code.** This is a plugin at the hook boundary, not
-  a network proxy.
+## Limits and non-goals
 
 The threat model is a careless leak, not an attacker with code execution on
 your machine.
 
-## Known limits
+**Does not protect against**
 
-- **The fake stays on screen.** A hook can append below an answer but cannot
-  rewrite it, so when Claude says "your key is `sk-ant-…`" you read the fake.
-  The model never held the real one, so this is cosmetic.
+- **A tool run with the real credential.** Restoring is the feature. If Claude
+  writes a command that ships the value to a third party, it ships the real one.
+- **A secret no layer recognizes.** Not in `.env`, matches no rule, entropy
+  off — the model reads it.
+- **Prompt injection.** `osm` masks credentials; it is not an injection defense.
+- **Anything outside Claude Code.** A hook-boundary plugin, not a network proxy.
+
+**Known limits**
+
+- **The fake stays on screen.** A hook can append below an answer but not
+  rewrite it, so "your key is `sk-ant-…`" shows the fake. Cosmetic — the model
+  never held the real one.
 - **A partial fake does not restore.** Restoration swaps a whole fake byte for
-  byte. If the model echoes only the first characters, those stay.
-- **Secret-shaped JSON property names are not masked.** Values only. Rewriting
-  keys needs collision handling in both directions and risks corrupting real
-  structures, for a case that barely occurs.
-- **Masking cost grows with the number of known secrets.** Each string is
-  tested against every secret the vault holds. This is fine at the usual scale.
-  With `persist` on and a long retention window it is worth watching.
-- **A classic hook downstream of this one sees the real value.** Its stdout is
-  written verbatim into the session transcript, so a `PreToolUse` hook that
-  echoes its rewritten input puts the restored credential on disk. See
-  [Where your secrets live](#where-your-secrets-live).
-- **A secret you type is masked for the model and still recorded.** The engine
-  writes the prompt as you typed it into the transcript before the masking hook
-  runs.
+  byte; an echoed prefix stays.
+- **Secret-shaped JSON property *names* are not masked.** Values only.
+- **Masking cost grows with the number of known secrets** — every string is
+  tested against every secret the vault holds. Fine at the usual scale; worth
+  watching with `persist` on and a long retention window.
+- **A classic hook downstream sees the real value**, and its stdout is written
+  verbatim into the transcript.
+- **A secret you type is masked for the model and still recorded** by the
+  engine, before the masking hook runs.
 
 ## Failure behavior
 
-Every hook fails closed. The engine *skips* a hook that throws or overruns its
-time budget and runs its own code in that hook's place. For a masking hook that
-outcome is worse than not being installed, because the unmasked content goes
-straight through.
-
-Each hook therefore answers for itself instead of letting the engine answer. A
-guard covers this plugin's own work and never a `next()` call, because charging
-the hooks beneath us to our budget would drop your prompt whenever some other
-plugin is slow. A visible refusal beats an invisible leak.
-
-Every masking call is synchronous, so a guard is a plain try/catch rather than
-a timer: synchronous work cannot overrun a deadline it blocks.
+**Every hook fails closed.** The engine *skips* a hook that throws or overruns
+its budget and runs core in its place — for a masking hook that is worse than
+not being installed, since the unmasked content goes straight through. So each
+hook answers for itself. The guard covers this plugin's own work and never a
+`next()` call, because charging the hooks beneath us to our budget would drop
+your prompt whenever another plugin is slow. A visible refusal beats an
+invisible leak.
 
 ## Tests
 
+No Claude Code install needed:
+
 ```sh
-bun run scripts/unit-check.ts   # 150 checks on the pure logic
-bun run scripts/hook-check.ts   # 35 checks on the hooks, through a fake engine
-bun run scripts/corpus-check.ts # our rules against gitleaks, Nosey Parker and secretlint fixtures
+bun run scripts/unit-check.ts    # 158 checks on the pure logic
+bun run scripts/hook-check.ts    # 41 checks on the hooks, through a fake engine
+bun run scripts/corpus-check.ts  # our rules vs gitleaks, Nosey Parker, secretlint fixtures
 npx --yes --package typescript@7 tsc -p tsconfig.json
-claude plugin validate .claude-plugin/plugin.json   # the engine must accept the hooks
+claude plugin validate .claude-plugin/plugin.json
 ```
 
-Neither check script needs Claude Code installed. The two runs below do, and
-they cost real model calls:
+These cost real model calls:
 
 ```sh
-bash scripts/local-e2e.sh       # 3 passes, 8 checks
-bash scripts/scenario-e2e.sh    # 11 scenarios in parallel tmux windows, 25 checks
+bash scripts/local-e2e.sh        # 3 passes, 8 checks
+bash scripts/scenario-e2e.sh     # 11 scenarios in parallel tmux windows, 25 checks
+bash scripts/wire-e2e.sh         # what actually left the machine
 ```
 
-`scripts/scenario-e2e.sh` covers every masking channel and the fail cases: an
-unknown fake must not be restored, a sabotaged `mask()` must refuse rather than
-let the engine serve the real result, and the hooks module must still validate.
-It prints tokens, cost and subagent counts per scenario.
-`scripts/sandbox-e2e.sh` runs one round trip in a disposable Linux box against
-OpenRouter, and `scripts/sandbox-scenarios.sh` runs the whole matrix there. The
-box-side wrapper installs tmux and jq, upgrades Claude Code to a version that
-has function hooks, and repoints the model at OpenRouter:
+<details>
+<summary>Why <code>wire-e2e.sh</code> is the only one that proves anything</summary>
 
-`scripts/wire-e2e.sh` answers a question none of the others can: not "did the
-hook return a fake" but "what actually left the machine". It puts a recording
-proxy in `ANTHROPIC_BASE_URL`, plants a canary credential, and reads the
-request bodies Claude Code sent. The canary must appear in none of them, a
-same-shaped fake in one, and a control run without the plugin must leak the
-canary — otherwise the run proves nothing. Request bodies are recorded;
-headers never are, because they carry the caller's own token.
+Every unit and hook check asserts that our hook *returned* a fake. None can
+show the engine *sent* one — a skipped hook fails open, and a returned `ref`
+makes core serve the messages it already built. Both look fine from inside.
 
-```sh
-export OPENROUTER_API_KEY=…            # in your own shell, never in a prompt
-cos offload -s s-2vcpu-4gb -v OPENROUTER_API_KEY -o matrix.log . \
-    'bash /work/scripts/sandbox-scenarios.sh'
-```
+`wire-e2e.sh` puts a recording proxy in `ANTHROPIC_BASE_URL`, plants a canary
+credential, and reads the request bodies Claude Code actually sent. It asserts
+three things, and the third is what makes the other two mean anything: the
+canary appears in no request body, a same-shaped fake appears in one, and a
+control run *without* the plugin **does** leak the canary. Without the control,
+a model that never read the file scores identically to a model that read a fake.
 
-The matrix passed 25 of 25 there on `anthropic/claude-sonnet-4.5` and again on
-`anthropic/claude-haiku-4.5`.
+Request bodies are recorded; headers never are, because they carry the caller's
+own token.
+
+`scenario-e2e.sh` also runs the fail cases, because a masker that breaks must
+break closed: an unknown fake must not be restored, and a sabotaged `mask()`
+must refuse rather than let the engine serve the real result.
+`sandbox-e2e.sh` and `sandbox-scenarios.sh` run the same matrix in a disposable
+Linux box against OpenRouter — 25 of 25 on both `anthropic/claude-sonnet-4.5`
+and `anthropic/claude-haiku-4.5`.
+
+</details>
 
 ## Project layout
 
-```
-hooks/
-  register.ts          wiring only
-  options.ts           plugin settings
-  env.ts               .env parsing, comment-aware
-  events/              one file per engine event
-    session-start.ts  tool-call.ts  prompt.ts  agent-spawn.ts  command.ts
-    compact.ts
-  vault/
-    index.ts           the two-way map
-    garble.ts          the format-preserving fake
-    walk.ts            bounded traversal, opaque-payload aware
-    persist.ts         $.store backing, on by default
-  detect/
-    index.ts           the scanner
-    prefix.ts          literal-prefix extraction
-    entropy.ts         the Shannon layer
-    suppress.ts        false-positive suppression
-    rules/             builtin llm cloud chat git devtools
-  policy/
-    boundary.ts        outbound and inbound, the one place `ref` is stripped
-    model-facing.ts    arguments that keep their fakes
-    budget.ts          failure fallbacks
-```
+One file per job: `hooks/events/` has one module per engine event, `vault/`
+holds the two-way map and the format-preserving `garble`, `detect/` the scanner
+and the six rule groups, `policy/` the boundary and the failure fallbacks.
+[CLAUDE.md](CLAUDE.md) has the full module map and the engine facts behind each
+design decision.
 
-`types/claude-code.d.ts` is the engine's own declaration file, written by
-`/plugin-types` and vendored so that CI can typecheck without a Claude Code
-install. It is not our code, and `.gitattributes` marks it generated.
+`types/claude-code.d.ts` is the engine's own declaration file, vendored so CI
+can typecheck without a Claude Code install. Not our code.
 
 ## Contributing
 
 New rules are the most useful contribution, and the bar is one rule, one line,
 one test. [CONTRIBUTING.md](CONTRIBUTING.md) has the anatomy of a rule, the
-prefix requirement, how to avoid false positives, and the checklist.
+prefix requirement, and the checklist.
 
-If you find a way to make the plugin leak a credential, report it privately
-through [Security Advisories](https://github.com/pratikbin/opensecretmask/security/advisories/new)
-rather than in a public issue. [SECURITY.md](SECURITY.md) says what counts and
-what to include. A missing rule for a vendor is a normal issue, not an advisory.
+**Found a way to make the plugin leak a credential?** Report it privately
+through [Security Advisories](https://github.com/pratikbin/opensecretmask/security/advisories/new),
+not a public issue — [SECURITY.md](SECURITY.md) says what counts. A missing
+rule for a vendor is a normal issue.
 
 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies to every space this project
 uses.
