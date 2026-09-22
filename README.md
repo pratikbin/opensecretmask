@@ -28,6 +28,13 @@ Nothing of the plugin's own is written to disk by default. The map of fake to
 real value lives in memory and dies with the session. For the full account of
 what is stored where, read [Where your secrets live](#where-your-secrets-live).
 
+![Installing osm, then watching Claude read a credential file and report a fake](.github/assets/osm-demo.gif)
+
+That is a real session, not a mock-up: the plugin is installed, a file holding
+`sk-ant-api03-Kv8Tz2…` is written and `cat`-ed, and the model answers with a
+different 74-character key of the same shape. `/osm-secrets` at the end prints
+the pair. `scripts/record-demo.sh` records it, in a throwaway sandbox.
+
 ## Who this is for
 
 - You paste credentials into a terminal where Claude Code is running.
