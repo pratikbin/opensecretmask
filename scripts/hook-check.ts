@@ -68,10 +68,10 @@ function seat(stored?: unknown, envFiles: Record<string, string> = {}, options: 
   return { hooks, catches, fire, recover, logs, statuses }
 }
 
-ok('H all nine hooks registered', (() => {
+ok('H all ten hooks registered', (() => {
   const { hooks } = seat()
   return ['session.start', 'tool.call', 'agent.spawn', 'prompt.submit', 'prompt.context',
-    'prompt.section', 'skill.prompt', 'session.receive', 'session.compact']
+    'prompt.section', 'skill.prompt', 'session.receive', 'session.compact', 'session.send']
     .every((n) => hooks.has(n))
 })())
 
@@ -219,8 +219,12 @@ ok('H all nine hooks registered', (() => {
   ok('C skill prompt masked', !skill.text.includes(KEY))
   ok('C skill prompt keeps its shape', skill.text.startsWith('use sk-ant-') && skill.text.endsWith(' to push'))
 
-  const got: any = await fire('session.receive', { origin: 'peer', text: `the key is ${KEY}` }, (e: any) => e)
+  const got: any = await fire('session.receive', { origin: { kind: 'peer', teammate: 'a', isVerified: true }, text: `the key is ${KEY}` }, (e: any) => e)
   ok('C delivery masked', !got.text.includes(KEY) && got.consumed === undefined)
+
+  // Another model reads it, and its vault has never seen this secret.
+  const sent: any = await fire('session.send', { to: 'peer', text: `use ${KEY}`, origin: { kind: 'model' } }, (e: any) => e)
+  ok('C outgoing message masked', !sent.text.includes(KEY) && sent.text.startsWith('use sk-ant-'))
 
   const messages = [
     { role: 'user', text: 'what is in the env file', toolUses: [], handle: 'h1' },
@@ -254,8 +258,11 @@ ok('H all nine hooks registered', (() => {
     () => ({ result: { stdout: KEY }, text: KEY }))
   const boom = () => { throw new Error('masking failed') }
 
-  const got: any = await fire('session.receive', { origin: 'relay', get text() { return boom() } }, (e: any) => e)
+  const got: any = await fire('session.receive', { origin: { kind: 'relay' }, get text() { return boom() } }, (e: any) => e)
   ok('C a delivery that cannot be masked is consumed', typeof got.consumed === 'string' && got.text === undefined)
+
+  const unsent: any = await fire('session.send', { to: 'peer', origin: { kind: 'model' }, get text() { return boom() } }, (e: any) => e)
+  ok('C a message that cannot be masked is not sent', unsent.isDelivered === false && unsent.text === undefined)
 
   const done: any = await fire('session.compact',
     { trigger: 'manual', messages: [{ role: 'user', get text() { return boom() }, toolUses: [] }] },
@@ -270,7 +277,7 @@ ok('H all nine hooks registered', (() => {
   const { catches, recover } = seat()
   ok('X every masking hook installs a catch handler',
     ['tool.call', 'agent.spawn', 'prompt.submit', 'prompt.context', 'prompt.section',
-      'skill.prompt', 'session.receive', 'session.compact'].every((n) => catches.has(n)))
+      'skill.prompt', 'session.receive', 'session.compact', 'session.send'].every((n) => catches.has(n)))
 
   const denied: any = await recover('tool.call', { tool: 'Bash', command: 'x' }, (e: any) => e)
   ok('X a failed tool.call denies rather than serving the result', typeof denied.deny === 'string')

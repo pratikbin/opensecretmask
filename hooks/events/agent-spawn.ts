@@ -5,6 +5,8 @@ import type { Vault } from '../vault'
 
 const DENY = 'osm: blocked. The subagent task could not be masked.'
 
+const UNSENT = 'osm: not sent. The message could not be masked.'
+
 /**
  * The subagent boundary.
  *
@@ -35,4 +37,14 @@ export function registerAgentSpawn(on: On, vault: Vault) {
       ? { deny: DENY }
       : next({ ...e, ...masked })
   }).catch(() => ({ deny: DENY }))
+
+  // The same boundary, sideways: a message to another session or agent. By
+  // now `tool.call` has restored SendMessage's fakes, and the receiver's vault
+  // does not know this secret, so its `session.receive` would pass it on whole.
+  on('session.send', ($, e, next) => {
+    const text = guard(() => vault.mask(e.text, 'session.send'), () => undefined)
+    return text === undefined
+      ? { isDelivered: false as const, reason: UNSENT }
+      : next({ ...e, text })
+  }).catch(() => ({ isDelivered: false as const, reason: UNSENT }))
 }

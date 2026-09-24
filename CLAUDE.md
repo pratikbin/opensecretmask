@@ -27,7 +27,7 @@ Everything else in this codebase is negotiable. That is not.
 | `hooks/events/tool-call.ts` | The round trip, both directions |
 | `hooks/events/prompt.ts` | The five channels that carry a prompt to the model |
 | `hooks/events/compact.ts` | `session.compact`, what the summarizer reads |
-| `hooks/events/agent-spawn.ts` | `agent.spawn`, the subagent boundary |
+| `hooks/events/agent-spawn.ts` | `agent.spawn` and `session.send`, the other-model boundary |
 | `hooks/events/command.ts` | `/osm-secrets`: one bounded `real → fake` line per secret |
 | `hooks/vault/index.ts` | The two-way map, and the ledger behind `/osm-secrets` |
 | `hooks/vault/garble.ts` | The format-preserving fake |
@@ -298,8 +298,8 @@ instead, because the engine rewrites the file.
 ## Build and test
 
 ```sh
-bun run scripts/unit-check.ts                          # 150 pure-logic checks
-bun run scripts/hook-check.ts                          # 35 hook-level checks
+bun run scripts/unit-check.ts                          # 159 pure-logic checks
+bun run scripts/hook-check.ts                          # 43 hook-level checks
 bun run scripts/corpus-check.ts                        # our rules vs upstream fixtures
 bun run scripts/fetch-corpus.ts                        # refresh corpus/, needs network
 npx --yes --package typescript@7 tsc -p tsconfig.json  # NB: --package, see below
@@ -307,6 +307,7 @@ bash scripts/local-e2e.sh                              # real model, 3 passes
 bash scripts/scenario-e2e.sh                           # 11 scenarios in tmux, 25 checks
 bash scripts/sandbox-e2e.sh                            # real model, throwaway box
 bash scripts/wire-e2e.sh                               # what actually left the machine
+bash scripts/send-e2e.sh                               # SendMessage to a session without osm
 ```
 
 `npx typescript@7 tsc` fails — the package's bin is `tsc`, not `typescript`, so

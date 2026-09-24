@@ -576,6 +576,7 @@ console.log(`rules: ${RULES.length}\n`)
 {
   // FX a subagent's report is read by the parent's model.
   ok('FX SubagentHandback keeps its fakes', isModelFacing('SubagentHandback', 'message'))
+  ok('FX SendMessage keeps its fakes', isModelFacing('SendMessage', 'message') && !isModelFacing('SendMessage', 'to'))
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

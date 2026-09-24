@@ -38,6 +38,9 @@ const KEEP_FAKES: Record<string, ReadonlySet<string>> = {
   // cover it. Observed leaking: the subagent emitted the fake, the parent
   // transcript received the real credential.
   SubagentHandback: new Set(['message', 'summary']),
+  // Read by another session's model. `session.send` re-masks the delivery;
+  // this keeps the real value out of the recorded arguments, as for `Agent`.
+  SendMessage: new Set(['message', 'summary']),
 }
 
 /** Whether `key` on `tool` must keep its fakes instead of being restored. */
