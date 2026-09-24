@@ -375,6 +375,7 @@ These cost real model calls:
 bash scripts/local-e2e.sh        # 3 passes, 8 checks
 bash scripts/scenario-e2e.sh     # 11 scenarios in parallel tmux windows, 25 checks
 bash scripts/wire-e2e.sh         # what actually left the machine
+bash scripts/send-e2e.sh         # what a SendMessage recipient read
 ```
 
 <details>
