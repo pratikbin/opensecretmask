@@ -56,7 +56,7 @@ export function registerPrompt(on: On, vault: Vault) {
   // Queued, transcribed and read by the model, all without `prompt.submit`.
   on('session.receive', ($, e, next) => {
     const text = guard(
-      () => vault.mask(e.text, `receive:${e.origin}`),
+      () => vault.mask(e.text, `receive:${e.origin.kind}`),
       () => undefined,
     )
     if (text === undefined) return { consumed: CONSUMED }
