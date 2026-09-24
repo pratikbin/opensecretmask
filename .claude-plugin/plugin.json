@@ -1,6 +1,6 @@
 {
   "name": "osm",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Replaces a secret with a format-preserving fake before the model reads it, and restores the real credential on the way into a tool call. The map survives a resume or a reload; set persist off to keep it in memory only.",
   "author": {
     "name": "pratikbin"
