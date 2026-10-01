@@ -74,7 +74,7 @@ send() { # name [claude flags]
   echo "sender rc=$?"
   for _ in $(seq 1 60); do grep -q OSMPING /tmp/wireB/bodies.txt 2>/dev/null && break; sleep 2; done
 }
-got() { grep -F -c "$CANARY" /tmp/wireB/bodies.txt 2>/dev/null || echo 0; }
+got() { local n; n=$(grep -F -c "$CANARY" /tmp/wireB/bodies.txt 2>/dev/null); echo "${n:-0}"; }
 
 echo
 echo "=== 2. control: sender without osm ==="
@@ -87,7 +87,6 @@ grep -q OSMPING /tmp/wireB/bodies.txt 2>/dev/null && ok "the message reached the
 
 echo
 echo "=== 3. sender with osm ==="
-export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1
 inbox inbox2
 send inbox2 --plugin-dir /work
 grep -q OSMPING /tmp/wireB/bodies.txt 2>/dev/null && ok "the message reached the recipient's model" \
