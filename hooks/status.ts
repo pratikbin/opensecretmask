@@ -57,8 +57,3 @@ export function statusLine(stats: Stats): string | undefined {
   lastDrawn = line
   return line
 }
-
-/** For the tests, which load the module once and run several sessions through it. */
-export function resetStatus(): void {
-  lastDrawn = ''
-}

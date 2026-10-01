@@ -12,9 +12,9 @@ repos:
         pass_filenames: false
         always_run: true
 
-      - id: hook-check
-        name: hook checks
-        entry: bun run scripts/hook-check.ts
+      - id: hook-tests
+        name: hook tests
+        entry: claude plugin test .
         language: system
         pass_filenames: false
         always_run: true

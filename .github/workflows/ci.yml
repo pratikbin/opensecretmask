@@ -23,7 +23,19 @@ jobs:
       - uses: oven-sh/setup-bun@v2.2.0
       - name: Pure-logic checks
         run: bun run scripts/unit-check.ts
-      - name: Hook-level checks
-        run: bun run scripts/hook-check.ts
       - name: Corpus checks
         run: bun run scripts/corpus-check.ts
+
+  # `claude plugin test` needs no login and no API key: the tests load the
+  # plugin into an offline engine and the world beneath it is stubbed.
+  hooks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Install Claude Code
+        run: npm install --global @anthropic-ai/claude-code@2.1.287
+      - name: Hook tests
+        run: claude plugin test .

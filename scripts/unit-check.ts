@@ -2,8 +2,9 @@
 //
 //   bun run scripts/unit-check.ts
 //
-// The hook-level checks live in scripts/hook-check.ts. This file covers the
-// detector, the vault, the .env parser, the persistence split and the budget.
+// The hook-level checks live in tests/register.test.ts, run by
+// `claude plugin test .`. This file covers the detector, the vault, the .env
+// parser, the persistence split and the budget.
 
 const R = new URL('../hooks', import.meta.url).pathname
 const { Vault } = await import(`${R}/vault/index.ts`)

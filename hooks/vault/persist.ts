@@ -92,7 +92,8 @@ export function identityKey(entry: Entry): string {
  * removal to respect, not damage to repair, and adds only what is genuinely
  * new. Module state, not per-call: it lives for one load of the plugin, the
  * same lifetime as the vault it backs. `resetKnownStore()` is the test-only
- * escape hatch, same pattern as `status.ts`'s `resetStatus()`.
+ * escape hatch for scripts/unit-check.ts, which runs several sessions through
+ * one load.
  */
 let known = new Set<string>()
 
