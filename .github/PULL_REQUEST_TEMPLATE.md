@@ -6,7 +6,7 @@
 
 ```sh
 bun run scripts/unit-check.ts
-bun run scripts/hook-check.ts
+claude plugin test .
 bun run scripts/corpus-check.ts
 npx --yes --package typescript@7 tsc -p tsconfig.json
 ```

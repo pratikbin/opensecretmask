@@ -55,12 +55,20 @@ whole value and need no exclusions, but eight match a context and take
 whatever follows, and what that wildcard must refuse is a property of the
 rules, not a heuristic hidden elsewhere.
 
-`types/claude-code.d.ts` (14.6k lines) is the engine's own declaration file
-from `/plugin-types`, vendored so CI typechecks without a Claude Code install.
-Not our code. `.gitattributes` marks it `linguist-generated`. Refresh it when
-the engine API moves: run `/plugin-types` and copy `.claude/types/claude-code.d.ts`
-over it. Earlier engine versions also wrote `.keys` and `.names` sidecars beside
-it; 2026-09-18's does not, so they are gone rather than left to rot.
+`types/claude-code*.d.ts` are the engine's own declaration files, vendored so CI
+typechecks without a Claude Code install. Not our code. `.gitattributes` marks
+them `linguist-generated`. Since 2.1.287 (mods GA) the engine writes them into
+`.claude-plugin/types/` every time it loads the plugin, with its own
+`.gitignore` and `tsconfig.json`. Refresh after an
+engine update: load the plugin once (`claude -p --plugin-dir .`), then copy
+`.claude-plugin/types/<name>/index.d.ts` over `types/<name>.d.ts` for
+`claude-code`, `claude-code-tools` and `claude-code-mcp`.
+
+Mods are on by default since 2.1.287; `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` is
+no longer needed. To run Claude Code with osm OFF (an e2e control), use
+`--safe-mode`, which loads no installed or `--plugin-dir` plugin, or disable
+the plugin through `--settings`. Setting the old flag to `0` is not a
+verified off switch.
 
 ## Engine facts that shape the code
 
@@ -230,7 +238,9 @@ ran with `persist: false` against a manifest shipping `true`. The restore path
 never executed under test, and the empty-secret bug — which arrives only
 through `load()` — could not be caught at the hook layer however many checks
 were added. Now that `options.ts` mirrors the manifest, `{}` *is* the shipped
-configuration and `seat()` passes it.
+configuration. Since 2.1.287 the hook tests run under `claude plugin test`,
+where the engine loads the plugin from its manifest, so they get the shipped
+options by construction.
 
 **`agentId` is camelCase.** The classic-hook spelling `agent_id` reads
 `undefined`.
@@ -299,7 +309,7 @@ instead, because the engine rewrites the file.
 
 ```sh
 bun run scripts/unit-check.ts                          # 159 pure-logic checks
-bun run scripts/hook-check.ts                          # 43 hook-level checks
+claude plugin test .                                   # 14 hook tests, real engine, no login
 bun run scripts/corpus-check.ts                        # our rules vs upstream fixtures
 bun run scripts/fetch-corpus.ts                        # refresh corpus/, needs network
 npx --yes --package typescript@7 tsc -p tsconfig.json  # NB: --package, see below
@@ -346,6 +356,22 @@ text. And the runner printed the model's answer, so the canary came back
 through the caller's tool result and was registered in the host store the
 sandbox existed to protect — output is a channel too.
 
+### `claude plugin test` traps
+
+`tests/register.test.ts` runs the plugin in the real engine, offline. Hooks a
+test registers with `on` sit beneath the plugin and play Claude Code. Four
+ways a test passes without testing anything:
+
+- An op stub (`fs.read`, `ui.log`, `ui.status`, `command.register`, …) must
+  answer `{ value }`. A bare return is silently skipped, and skips are only
+  reported on failure. `tsc` on `tests/` catches the shape.
+- A refused compaction has no `messages`, and `JSON.stringify(undefined)`
+  contains no key, so it passes every `not.toContain`. The `compact()` helper
+  asserts there is no `skip` first.
+- The engine rejects non-plain data (`not plain data: Error`), so a throwing
+  getter cannot make `mask()` fail. Use malformed plain data (`text: 5`).
+- Register the stubs before the first `$` call.
+
 ### e2e traps
 
 Five things make a runner look broken when it is not.
@@ -365,6 +391,16 @@ Five things make a runner look broken when it is not.
 
 ## Open items
 
+- Under `sec-default` (Team/Enterprise, or any machine with managed
+  settings), three channels skip osm. The built-in mod seats itself outermost
+  and continues `prompt.section`, `prompt.context` and `skill.prompt` past the
+  user tier, so CLAUDE.md, memory and skill bodies reach the model unmasked.
+  `tool.call`, `prompt.submit` and `session.*` still pass through osm.
+  `allowManagedModsOnly` refuses osm entirely, and `agent.spawn` of an
+  org-provided agent also skips it. Source:
+  `anthropics/claude-code/mods/sec-default/README.md`. Read from the source,
+  not reproduced: reproducing it needs a system-wide managed-settings file.
+  The fix is for the org to deploy osm in `prependPlugins`.
 - Secret-shaped JSON property *names* are not masked. Values only. Rewriting
   keys needs two-way collision handling for a case that barely occurs.
 - A partial fake does not restore; prefix matching needs false-positive guards.

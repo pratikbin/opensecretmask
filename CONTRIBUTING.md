@@ -5,15 +5,15 @@ line, one test. This guide covers that first, then the rest of the project.
 
 ## Setup
 
-You need [bun](https://bun.sh) to run the checks, and Claude Code 2.1.272 or
+You need [bun](https://bun.sh) to run the checks, and Claude Code 2.1.287 or
 newer to run the plugin.
 
 ```sh
 git clone https://github.com/pratikbin/opensecretmask
 cd opensecretmask
 bun run scripts/unit-check.ts
-bun run scripts/hook-check.ts
-npx --yes --package typescript@7 tsc -p tsconfig.json
+claude plugin test .
+bunx -p typescript@7 tsc -p tsconfig.json
 ```
 
 There is no build step and no dependency to install. The hooks are TypeScript
@@ -23,7 +23,7 @@ To try your change against a real session:
 
 ```sh
 cd ~/some-project
-CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir /path/to/opensecretmask
+claude --plugin-dir /path/to/opensecretmask
 ```
 
 ## The one invariant
@@ -171,7 +171,7 @@ guards this.
 | Command | Covers | Needs |
 | --- | --- | --- |
 | `bun run scripts/unit-check.ts` | Detection, vault, `.env`, persistence, guards | bun |
-| `bun run scripts/hook-check.ts` | The six hooks, through a fake engine | bun |
+| `claude plugin test .` | Every hook, through the real engine | Claude Code (no login) |
 | `npx --yes --package typescript@7 tsc -p tsconfig.json` | Types | npx |
 | `claude plugin validate .claude-plugin/plugin.json` | The engine accepts the module | Claude Code |
 | `bash scripts/local-e2e.sh` | One round trip against a real model | Claude Code, money |

@@ -40,7 +40,7 @@ Do not open a public issue for a leak path.
 
 Include the channel (which hook, which field), the shape of the value that
 escaped, and a reproduction if you have one. A failing case in
-`scripts/hook-check.ts` form is the most useful thing you can send.
+`tests/register.test.ts` form is the most useful thing you can send.
 
 Expect an acknowledgement within a week. There is no bounty.
 
@@ -49,5 +49,5 @@ issue, or send a PR per `CONTRIBUTING.md`.
 
 ## Supported versions
 
-The latest release only. osm tracks the Claude Code function-hooks API, which
+The latest release only. osm tracks the Claude Code mods API, which
 still moves.

@@ -16,14 +16,14 @@ body:
       description: |
         ```sh
         bun run scripts/unit-check.ts
-        bun run scripts/hook-check.ts
+        claude plugin test .
         ```
       render: text
   - type: input
     id: version
     attributes:
       label: osm and Claude Code versions
-      placeholder: osm 0.1.0, Claude Code 2.1.272
+      placeholder: osm 0.2.0, Claude Code 2.1.287
   - type: input
     id: platform
     attributes:

@@ -44,14 +44,11 @@ anyway. This is the whole point of the project.
 
 ## Install
 
-Needs Claude Code **2.1.272+**. Function hooks are early-access, so the flag is
-required.
+Needs Claude Code **2.1.287+**, where mods are on by default.
 
 ```sh
 claude plugin marketplace add pratikbin/opensecretmask
 claude plugin install osm@opensecretmask
-
-CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude
 ```
 
 <details>
@@ -60,7 +57,7 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude
 ```sh
 git clone https://github.com/pratikbin/opensecretmask ~/.claude/osm
 cd ~/your-project
-CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir ~/.claude/osm
+claude --plugin-dir ~/.claude/osm
 ```
 
 `--plugin-dir` takes the directory holding `.claude-plugin/plugin.json`. The
@@ -105,7 +102,7 @@ origin: a tool name, or `file:key` for a session-start registration.
 
 ## How it works
 
-Claude Code exposes function hooks at each boundary where text moves between
+Claude Code exposes mod hooks at each boundary where text moves between
 you, the model and the outside world. `osm` sits on ten of them.
 
 ```mermaid
@@ -362,11 +359,11 @@ invisible leak.
 No Claude Code install needed:
 
 ```sh
-bun run scripts/unit-check.ts    # 158 checks on the pure logic
-bun run scripts/hook-check.ts    # 41 checks on the hooks, through a fake engine
+bun run scripts/unit-check.ts    # 159 checks on the pure logic
 bun run scripts/corpus-check.ts  # our rules vs gitleaks, Nosey Parker, secretlint fixtures
 npx --yes --package typescript@7 tsc -p tsconfig.json
 claude plugin validate .claude-plugin/plugin.json
+claude plugin test .              # 14 hook tests through the real engine, no login
 ```
 
 These cost real model calls:
