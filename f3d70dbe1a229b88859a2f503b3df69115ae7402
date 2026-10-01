@@ -1,0 +1,9 @@
+Session 2026-10-02: mods GA (Claude Code 2.1.287) stabilisation.
+User asked to read the mods launch posts and make osm stable on official mods, then test in a CreateOS sandbox with OpenRouter, commit and push.
+- Read claude.dev getting-started guide and claude.com launch post.
+- Vendored 2.1.287 types (3 files); typecheck clean.
+- Ported scripts/hook-check.ts (43 checks) to tests/register.test.ts under claude plugin test; 14 tests pass; mutation (mask returns input) -> 10 fail; no login needed (verified empty HOME, Linux sandbox).
+- Removed CLAUDE_CODE_ENABLE_FUNCTION_HOOKS; local-e2e control uses --safe-mode (debug log: no osm load).
+- sec-default (managed machines) continues prompt.section/prompt.context/skill.prompt past user tier -> documented as open item, read from source, not reproduced.
+- Local scenario-e2e 25/25. Sandbox (OpenRouter, isolated boxes): sandbox-scenarios 25/25, wire-e2e PASS, sandbox-e2e PASS, send-e2e PASS after fixing a grep -c double-0 bug.
+- /simplify pass: 6 cleanups in tests. Known gap: the skill.prompt .catch assertion does not prove the catch exists (removing it still passes).
