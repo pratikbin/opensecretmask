@@ -25,12 +25,11 @@ hash -r
 claude --version
 
 echo
-echo "=== 3. does this build know function hooks? ==="
+echo "=== 3. does this build know mods? ==="
 GROOT=$(npm root -g 2>/dev/null)
 CLI="$GROOT/@anthropic-ai/claude-code/cli.js"
 if [ -f "$CLI" ]; then
   echo "cli.js: $CLI"
-  echo "ENABLE_FUNCTION_HOOKS hits: $(grep -c 'ENABLE_FUNCTION_HOOKS' "$CLI" || true)"
   echo "hooks.json hits:           $(grep -c 'hooks\.json' "$CLI" || true)"
   echo "plugin.register hits:      $(grep -c 'plugin\.register' "$CLI" || true)"
 else
@@ -85,7 +84,6 @@ run_case() {
 run_case "6. CONTROL: no plugin" | tee /tmp/control.txt
 CONTROL_DISK=$(cat /work/roundtrip.txt 2>/dev/null || echo "")
 
-export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1
 run_case "7. WITH the osm plugin" --plugin-dir /work | tee /tmp/withmod.txt
 MOD_DISK=$(cat /work/roundtrip.txt 2>/dev/null || echo "")
 

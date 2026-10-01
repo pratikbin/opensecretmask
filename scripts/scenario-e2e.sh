@@ -26,7 +26,7 @@
 # `~/.claude/projects/<slug>/<session_id>/subagents/agent-*.jsonl`, which is
 # where its tokens live and where the leak check reads.
 #
-# It needs Claude Code 2.1.273 or newer, tmux, and jq.
+# It needs Claude Code 2.1.287 or newer, tmux, and jq.
 set -uo pipefail
 
 PLUGIN="$(cd "$(dirname "$0")/.." && pwd)"
@@ -141,10 +141,7 @@ for id in "${PICK[@]}"; do
   printf '%s\n' "${LOCAL_ONLY[@]}" | grep -qx "$id" && continue
   scenario "$id" || continue
   printf '%s' "$PROMPT" > "$OUT/$id.prompt"
-  # The control pass must run with function hooks OFF, not merely without
-  # `--plugin-dir`: on a machine where osm is installed for real, an inherited
-  # copy masks the control too and the matrix quietly proves nothing.
-  cmd="cd '$FIX' && CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=$WITH_PLUGIN timeout 300 claude -p --output-format json"
+  cmd="cd '$FIX' && timeout 300 claude -p --output-format json"
   cmd="$cmd --append-system-prompt '$SYS'"
   [ ${#TOOLS[@]} -gt 0 ] && cmd="$cmd --allowedTools $(printf "'%s' " "${TOOLS[@]}")"
   # The control must turn off an osm INSTALLED on this machine, not merely go

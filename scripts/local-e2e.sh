@@ -10,7 +10,7 @@
 # grep finds it and prints 1. If the hook did not, grep prints 0. A file write
 # reads as an exfiltration pattern and the model refuses it.
 #
-# Run it from anywhere. It needs Claude Code 2.1.272 or newer.
+# Run it from anywhere. It needs Claude Code 2.1.287 or newer.
 #
 #   tmux new-session -d -s osmtest 'bash scripts/local-e2e.sh 2>&1 | tee /tmp/osm.log'
 #   tmux capture-pane -p -t osmtest
@@ -58,9 +58,8 @@ run() {
   echo
 }
 
-run "1. CONTROL, no plugin" "$P1" | tee "$HERE/control.txt"
+run "1. CONTROL, no plugin" "$P1" --safe-mode | tee "$HERE/control.txt"
 
-export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1
 run "2. WITH the plugin" "$P1" --plugin-dir "$PLUGIN" | tee "$HERE/plugin.txt"
 run "3. registered .env layer" "$P2" --plugin-dir "$PLUGIN" | tee "$HERE/envlayer.txt"
 

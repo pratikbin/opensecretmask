@@ -95,7 +95,6 @@ echo "canary occurrences on the wire: $CONTROL"
 echo
 echo "=== 5. with the plugin ==="
 rm -rf "$WIRE_OUT"; mkdir -p "$WIRE_OUT"
-export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1
 timeout 300 claude -p --dangerously-skip-permissions --plugin-dir /work "$PROMPT" > /tmp/plugin.log 2>&1
 echo "claude rc=$?"
 MASKED=$(count)

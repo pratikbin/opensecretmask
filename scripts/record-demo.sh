@@ -65,11 +65,10 @@ export DISABLE_TELEMETRY=1
 export DISABLE_ERROR_REPORTING=1
 export DISABLE_AUTOUPDATER=1
 export DISABLE_NON_ESSENTIAL_MODEL_CALLS=1
-export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1
 export PS1='\[\033[36m\]demo\[\033[0m\]:\[\033[33m\]\w\[\033[0m\]\$ '
 EOF
 
-say "3. claude, at a version that has function hooks"
+say "3. claude, at a version that has mods"
 # The rootfs ships an older Claude Code under root's asdf, which the demo user
 # cannot reach. The official installer puts a current one in ~/.local/bin.
 su - demo -c 'curl -fsSL https://claude.ai/install.sh | bash' >/tmp/claude-install.log 2>&1 \

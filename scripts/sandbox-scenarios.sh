@@ -35,7 +35,7 @@ tmux -V; jq --version
 
 echo
 echo "=== 3. claude ==="
-# Function hooks need 2.1.272 or newer. The image ships something older.
+# Mods need 2.1.287 or newer. The image ships something older.
 claude --version
 npm install -g @anthropic-ai/claude-code@latest >/tmp/npm.log 2>&1 \
   || { echo "npm install failed:"; tail -5 /tmp/npm.log; }
@@ -56,7 +56,6 @@ export IS_SANDBOX=1
 export DISABLE_TELEMETRY=1
 export DISABLE_ERROR_REPORTING=1
 export DISABLE_AUTOUPDATER=1
-export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1
 echo "model: $M via $ANTHROPIC_BASE_URL"
 
 echo
@@ -65,9 +64,8 @@ echo "=== 5. static checks ==="
 # whatever runtime is here. Node 22 or newer runs a .ts file directly.
 if command -v bun >/dev/null; then
   bun run scripts/unit-check.ts | tail -3
-  bun run scripts/hook-check.ts | tail -3
 else
-  echo "(no bun in the image; the unit and hook checks run on the host)"
+  echo "(no bun in the image; the unit checks run on the host)"
 fi
 claude plugin validate .claude-plugin/plugin.json 2>&1 | tail -3
 
