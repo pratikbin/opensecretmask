@@ -12,8 +12,8 @@ declare module 'claude-code' {
       subagent_type?: string
       /** Optional model override for this agent. Takes precedence over the agent definition's model frontmatter and the configured default subagent model. If omitted, uses the agent definition's model, else the default (inherits from the parent unless a default subagent model is configured). Ignored for subagent_type: "fork" — forks always inherit the parent model. */
       model?: "sonnet" | "opus" | "haiku" | "fable"
-      /** Agents run in the background by default; you will be notified when one completes. Set to false only when your very next action depends on this agent's result and nothing else could usefully happen while it runs — otherwise leave it in the background so the user can hand you other work. */
-      run_in_background?: boolean
+      /** Reasoning effort for this agent. Set this ONLY when the user, or instructions such as CLAUDE.md or a skill, explicitly ask that this agent or delegated work run at a specific effort level, never on your own judgment; otherwise omit it and the agent runs at its usual effort. Ignored for subagent_type: "fork": a fork runs at your own effort. */
+      effort?: "low" | "medium" | "high" | "xhigh" | "max"
       /** Name for the spawned agent. Makes it addressable via SendMessage({to: name}) while running. */
       name?: string
       /** Deprecated; ignored. The session has a single implicit team. */
@@ -210,7 +210,7 @@ declare module 'claude-code' {
       timeout?: number
       /** Clear, concise description of what this command does in active voice. Never use words like "complex" or "risk" in the description - just describe what it does. Say what the command does in plain words: do not echo the command's text, its flags, or file paths - the user reads this description, often without seeing the command. For simple commands (git, npm, standard CLI tools), keep it brief (5-10 words): - ls → "List files in current directory" - git status → "Show working tree status" - npm install → "Install package dependencies" For commands that are harder to parse at a glance (piped commands, obscure flags, etc.), add enough context to clarify what it does: - find . -name "*.tmp" -exec rm {} \; → "Find and delete all .tmp files recursively" - git reset --hard origin/main → "Discard all local changes and match remote main" - curl -s url | jq '.data[]' → "Fetch JSON from URL and extract data array elements" */
       description?: string
-      /** Set to true to run this command in the background. With it, `timeout` limits how long the command may run in the background before it is stopped (default 1800000 ms, max 7200000 ms). */
+      /** Set to true to run this command in the background. */
       run_in_background?: boolean
       /** Set this to true to dangerously override sandbox mode and run commands without sandboxing. */
       dangerouslyDisableSandbox?: boolean
@@ -427,6 +427,10 @@ declare module 'claude-code' {
       /** The type of edit to make (replace, insert, delete). Defaults to replace. */
       edit_mode?: "replace" | "insert" | "delete"
     }
+    OfferChromeSetup: {
+      /** A short phrase naming what the task needs the user's own browser for. */
+      reason?: string
+    }
     Poll: {}
     Projects: {
       method: "project_info" | "project_read" | "project_search" | "project_write" | "project_delete" | "project_memory_list" | "project_memory_read"
@@ -464,6 +468,75 @@ declare module 'claude-code' {
       /** Whether to ask the user for approval before the goal is set. Defaults to true — an approval dialog is shown. Set false ONLY when the user's own words in this conversation stated this outcome as what they want; the goal is then set directly, with a visible notice in the transcript, and the user can clear it with /goal clear. */
       ask_user?: boolean
     }
+    PublishPlugin: {
+      /** The plugin's folder on this machine: the one that holds .claude-plugin/plugin.json, or a mod's hooks/ where there is no manifest yet. */
+      path: string
+      /** Where to publish. The one destination is the library of the organization the session is signed in to. */
+      destination?: "organization"
+      /** What the plugin does, in a sentence: used only for a manifest written for a folder that has none. */
+      description?: string
+      /** True only when the person said to replace the plugin of the same name that is already in their uploads on claude.ai. */
+      replace?: boolean
+      /** Leave out. The tool fills it for the question the person answers: the organization, the folder, the steps, and the files sent. */
+      shown?: string[]
+      /** Leave out. The tool fills it with the same question as data, for a surface that draws its own: what a yes binds to, every file sent, and the entries that stay and are named. */
+      question?: {
+        /** What a yes binds to: the publish is of this, or refused. */
+        digest: string
+        title: string
+        organization: {
+          id: string
+          name?: string
+        }
+        plugin: {
+          name: string
+          version?: string
+        }
+        folder: string
+        /** Whether a plugin of this name on the shelf is replaced. */
+        mode: "new" | "replace"
+        /** What a yes sets off, a sentence each, in order. */
+        steps: string[]
+        /** What the person is warned of, a sentence each: a file sent although its name is one a secret hides under, and that other entries stay behind unnamed. */
+        warnings: string[]
+        /** The manifest a yes writes into the folder first, if any. */
+        writes?: {
+          path: string
+          text: string
+        }
+        /** The whole count and size of what is sent. */
+        sends: {
+          files: number
+          bytes: number
+        }
+        /** The files sent, in the order of their paths. */
+        files: Array<{
+          path: string
+          bytes: number
+          sha256: string
+          /** Whether it is sent as runnable. */
+          runs: boolean
+        }>
+        /** How many entries stay on the machine and are counted here. */
+        staying: number
+        /** The entries that stay and are named, each with why. */
+        stays: Array<{
+          path: string
+          why: "link" | "hard-link" | "ignored" | "secret" | "never" | "generated" | "special" | "backslash"
+          words: string
+        }>
+        /** The list, a line each, of every file sent and every entry that stays and is named, and a last line saying so where entries stay unnamed: its sha256, and the file that holds it. */
+        list: {
+          sha256: string
+          path?: string
+        }
+        /** Present only when the lists are over the bound: how many files and entries they do not name. The list file names them. */
+        unnamed?: {
+          files: number
+          stays: number
+        }
+      }
+    }
     PushNotification: {
       /** The notification body. Keep it under 200 characters; mobile OSes truncate. */
       message: string
@@ -478,6 +551,8 @@ declare module 'claude-code' {
       limit?: number
       /** Page range for PDF files (e.g., "1-5", "3", "10-20"). Only applicable to PDF files. Maximum 20 pages per request. */
       pages?: string
+      /** Set to true to read a text file, or a line range of one, that is over the usual size limits, up to what still fits in your context. Only use this when you genuinely need all of it or the user asked for the whole file; otherwise read it in parts with offset and limit, or search it. */
+      allow_large?: boolean
     }
     ReadMcpResourceDirTool: {
       /** The MCP server name */
@@ -703,6 +778,8 @@ declare module 'claude-code' {
       url: string
       /** The prompt to run on the fetched content */
       prompt: string
+      /** Character position in the page text to start reading from. Use it to read on through a page too long for one call, with the value the previous result gave. */
+      offset?: number
     }
     WebSearch: {
       /** The search query to use */
@@ -711,6 +788,8 @@ declare module 'claude-code' {
       allowed_domains?: string[]
       /** Never include search results from these domains */
       blocked_domains?: string[]
+      /** "standard": the normal web search: quick and cheap; right for straightforward lookups (reference facts, official pages, documentation, well-known people, places and topics) and simple follow-up lookups. "extended": a thorough, fresh search at several times the cost and latency. */
+      mode: "standard" | "extended"
     }
     Workflow: {
       /** Self-contained workflow script. Must begin with `export const meta = { name, description, phases }` (pure literal, no computed values) followed by the script body using agent()/parallel()/pipeline()/phase(). */
@@ -806,6 +885,8 @@ declare module 'claude-code' {
       prompt: string
       worktreePath?: string
       worktreeBranch?: string
+      /** @internal False when the calling agent cannot continue this agent with a follow-up message (it holds no messaging tool); absent means it can. */
+      canContinueAgent?: boolean
     } | {
       status: "async_launched"
       isAsync?: true
@@ -823,6 +904,8 @@ declare module 'claude-code' {
       outputFile: string
       /** Whether the calling agent has Read/Bash tools to check progress */
       canReadOutputFile?: boolean
+      /** @internal False when the calling agent cannot continue this agent with a follow-up message (it holds no messaging tool); absent means it can. */
+      canContinueAgent?: boolean
       /** @internal True when this unisolated write-capable agent was launched into a working directory where another one is already running and a worktree could have been made here (drives a model-facing note; not a stable consumer field) */
       sharesCwd?: boolean
     } | {
@@ -1024,6 +1107,8 @@ declare module 'claude-code' {
         pinned?: boolean
       }>
       truncated?: boolean
+      total?: number
+      total_at_least?: true
       pins_enabled?: boolean
       scope?: "shared" | "all"
       external_listed?: true
@@ -1117,6 +1202,12 @@ declare module 'claude-code' {
         }[]
         types_more?: boolean
         dashboard_type?: {
+          title: string
+          type_url: string
+          description?: string
+          tier?: string
+        }
+        motion_type?: {
           title: string
           type_url: string
           description?: string
@@ -1404,6 +1495,11 @@ declare module 'claude-code' {
           documents: number
           max_documents: number
         }
+        embedded?: {
+          strings: number
+          kb: number
+        }
+        warnings?: string[]
       } | {
         op: "batch"
         committed: boolean
@@ -1419,6 +1515,11 @@ declare module 'claude-code' {
           documents: number
           max_documents: number
         }
+        embedded?: {
+          strings: number
+          kb: number
+        }
+        warnings?: string[]
         fallback?: "sequential"
       }
     } | {
@@ -1629,6 +1730,17 @@ declare module 'claude-code' {
         title?: string
       }
     } | {
+      page_versions: {
+        url: string
+        rows: {
+          id: string
+          createdAt?: string
+          current?: true
+        }[]
+        degraded?: true
+        cut?: true
+      }
+    } | {
       verify: {
         url: string
         ver: string
@@ -1660,6 +1772,19 @@ declare module 'claude-code' {
         }[]
         issuesDropped?: number
         renderError?: string
+      }
+    } | {
+      emulatorPreview: {
+        file: string
+        outcome: string
+        pictures: {
+          path: string
+          base64?: string
+        }[]
+        marks?: string[]
+        errors?: string[]
+        outline?: string
+        stopped?: string
       }
     }
     ArtifactCheck: {
@@ -1826,6 +1951,8 @@ declare module 'claude-code' {
         pinned?: boolean
       }>
       truncated?: boolean
+      total?: number
+      total_at_least?: true
       pins_enabled?: boolean
       scope?: "shared" | "all"
       external_listed?: true
@@ -1919,6 +2046,12 @@ declare module 'claude-code' {
         }[]
         types_more?: boolean
         dashboard_type?: {
+          title: string
+          type_url: string
+          description?: string
+          tier?: string
+        }
+        motion_type?: {
           title: string
           type_url: string
           description?: string
@@ -2206,6 +2339,11 @@ declare module 'claude-code' {
           documents: number
           max_documents: number
         }
+        embedded?: {
+          strings: number
+          kb: number
+        }
+        warnings?: string[]
       } | {
         op: "batch"
         committed: boolean
@@ -2221,6 +2359,11 @@ declare module 'claude-code' {
           documents: number
           max_documents: number
         }
+        embedded?: {
+          strings: number
+          kb: number
+        }
+        warnings?: string[]
         fallback?: "sequential"
       }
     } | {
@@ -2431,6 +2574,17 @@ declare module 'claude-code' {
         title?: string
       }
     } | {
+      page_versions: {
+        url: string
+        rows: {
+          id: string
+          createdAt?: string
+          current?: true
+        }[]
+        degraded?: true
+        cut?: true
+      }
+    } | {
       verify: {
         url: string
         ver: string
@@ -2462,6 +2616,19 @@ declare module 'claude-code' {
         }[]
         issuesDropped?: number
         renderError?: string
+      }
+    } | {
+      emulatorPreview: {
+        file: string
+        outcome: string
+        pictures: {
+          path: string
+          base64?: string
+        }[]
+        marks?: string[]
+        errors?: string[]
+        outline?: string
+        stopped?: string
       }
     }
     ArtifactComments: {
@@ -2628,6 +2795,8 @@ declare module 'claude-code' {
         pinned?: boolean
       }>
       truncated?: boolean
+      total?: number
+      total_at_least?: true
       pins_enabled?: boolean
       scope?: "shared" | "all"
       external_listed?: true
@@ -2721,6 +2890,12 @@ declare module 'claude-code' {
         }[]
         types_more?: boolean
         dashboard_type?: {
+          title: string
+          type_url: string
+          description?: string
+          tier?: string
+        }
+        motion_type?: {
           title: string
           type_url: string
           description?: string
@@ -3008,6 +3183,11 @@ declare module 'claude-code' {
           documents: number
           max_documents: number
         }
+        embedded?: {
+          strings: number
+          kb: number
+        }
+        warnings?: string[]
       } | {
         op: "batch"
         committed: boolean
@@ -3023,6 +3203,11 @@ declare module 'claude-code' {
           documents: number
           max_documents: number
         }
+        embedded?: {
+          strings: number
+          kb: number
+        }
+        warnings?: string[]
         fallback?: "sequential"
       }
     } | {
@@ -3233,6 +3418,17 @@ declare module 'claude-code' {
         title?: string
       }
     } | {
+      page_versions: {
+        url: string
+        rows: {
+          id: string
+          createdAt?: string
+          current?: true
+        }[]
+        degraded?: true
+        cut?: true
+      }
+    } | {
       verify: {
         url: string
         ver: string
@@ -3264,6 +3460,19 @@ declare module 'claude-code' {
         }[]
         issuesDropped?: number
         renderError?: string
+      }
+    } | {
+      emulatorPreview: {
+        file: string
+        outcome: string
+        pictures: {
+          path: string
+          base64?: string
+        }[]
+        marks?: string[]
+        errors?: string[]
+        outline?: string
+        stopped?: string
       }
     }
     ArtifactData: {
@@ -3430,6 +3639,8 @@ declare module 'claude-code' {
         pinned?: boolean
       }>
       truncated?: boolean
+      total?: number
+      total_at_least?: true
       pins_enabled?: boolean
       scope?: "shared" | "all"
       external_listed?: true
@@ -3523,6 +3734,12 @@ declare module 'claude-code' {
         }[]
         types_more?: boolean
         dashboard_type?: {
+          title: string
+          type_url: string
+          description?: string
+          tier?: string
+        }
+        motion_type?: {
           title: string
           type_url: string
           description?: string
@@ -3810,6 +4027,11 @@ declare module 'claude-code' {
           documents: number
           max_documents: number
         }
+        embedded?: {
+          strings: number
+          kb: number
+        }
+        warnings?: string[]
       } | {
         op: "batch"
         committed: boolean
@@ -3825,6 +4047,11 @@ declare module 'claude-code' {
           documents: number
           max_documents: number
         }
+        embedded?: {
+          strings: number
+          kb: number
+        }
+        warnings?: string[]
         fallback?: "sequential"
       }
     } | {
@@ -4035,6 +4262,17 @@ declare module 'claude-code' {
         title?: string
       }
     } | {
+      page_versions: {
+        url: string
+        rows: {
+          id: string
+          createdAt?: string
+          current?: true
+        }[]
+        degraded?: true
+        cut?: true
+      }
+    } | {
       verify: {
         url: string
         ver: string
@@ -4066,6 +4304,19 @@ declare module 'claude-code' {
         }[]
         issuesDropped?: number
         renderError?: string
+      }
+    } | {
+      emulatorPreview: {
+        file: string
+        outcome: string
+        pictures: {
+          path: string
+          base64?: string
+        }[]
+        marks?: string[]
+        errors?: string[]
+        outline?: string
+        stopped?: string
       }
     }
     AskUserQuestion: {
@@ -4137,7 +4388,7 @@ declare module 'claude-code' {
       timedOutAfterMs?: number
       /** Model-facing note that the session cwd was not changed by a backgrounded command containing a directory-change builtin (cd/pushd/popd/chdir) */
       backgroundCwdHint?: string
-      /** True when this backgrounded command is owned by a synchronous subagent and is therefore terminated when that agent gives its final response; absent when the command survives (main loop, async subagents) */
+      /** True when this backgrounded command is terminated at its caller's final response, so no completion notification can follow (a synchronous subagent's command, or a headless session that takes no further input and is not waiting for background commands); absent when the command survives */
       backgroundEndsWithFinalResponse?: true
       /** Flag to indicate if sandbox mode was overridden */
       dangerouslyDisableSandbox?: boolean
@@ -4420,6 +4671,21 @@ declare module 'claude-code' {
     ListAgents: {
       /** Formatted list of reachable agents */
       listing: string
+      sections?: {
+        kind: string
+        total: number
+        rows: {
+          name?: string
+          ref?: string
+          id?: string
+          type?: string
+          status?: string
+        }[]
+      }[]
+      notes?: {
+        kind: string
+        text: string
+      }[]
     }
     ListConnectors: {
       connectors: {
@@ -4545,6 +4811,9 @@ declare module 'claude-code' {
       /** The updated notebook content after modification */
       updated_file: string
     }
+    OfferChromeSetup: {
+      outcome: "connected" | "not_now" | "no_attempt_yet"
+    }
     Poll: {
       /** Rendered event envelopes, or "(no pending events)" */
       content: string
@@ -4609,6 +4878,8 @@ declare module 'claude-code' {
       file_kind?: string
       content?: string
       local_file?: string
+      /** @internal Size in UTF-8 bytes of the document's whole text. Set only when the text is in local_file and project_read had a token limit on inline text. */
+      size_bytes?: number
       created_at: string | null
     } | {
       method: "project_search"
@@ -4662,6 +4933,11 @@ declare module 'claude-code' {
       condition: string
       /** Whether the user was asked for approval (true) or the goal was set directly (false) */
       askUser: boolean
+    }
+    PublishPlugin: {
+      state: "published" | "in-review" | "publishing" | "on-shelf" | "refused"
+      refusal?: string
+      lines: string[]
     }
     PushNotification: {
       message: string
@@ -4800,9 +5076,13 @@ declare module 'claude-code' {
         queued_at: string
         /** Verbatim notification body. */
         content: string
+        /** RFC3339 timestamp, by this machine's clock, of when the notification reached this session's queue. Missing from results saved before this field existed. */
+        arrived_at?: string
       }>
       /** Notifications still queued after this drain (drains are size-budgeted); call the tool again to read them. */
       remaining: number
+      /** RFC3339 timestamp, by this machine's clock, of when this call read the queue. Missing from results saved before this field existed. */
+      read_at?: string
     }
     RemoteTrigger: {
       status: number
@@ -4909,6 +5189,7 @@ declare module 'claude-code' {
         pathValidated?: boolean
         upload_error?: string
         upload_error_code?: string
+        upload_suspected_limit_bytes?: number
         scaled?: {
           width: number
           height: number
@@ -4933,6 +5214,7 @@ declare module 'claude-code' {
         pathValidated?: boolean
         upload_error?: string
         upload_error_code?: string
+        upload_suspected_limit_bytes?: number
         scaled?: {
           width: number
           height: number
@@ -5089,7 +5371,6 @@ declare module 'claude-code' {
       needsAuth: string[]
       disabled: string[]
       unconfigured?: string[]
-      replRouted?: boolean
       unknown: string[]
     }
     WebFetch: {
@@ -5124,6 +5405,8 @@ declare module 'claude-code' {
           title: string
           /** The URL of the search result */
           url: string
+          /** Page text. PostToolUse hooks get it; tool_use_result does not. */
+          snippet?: string
         }>
       } | string>
       /** Time taken to complete the search operation */
