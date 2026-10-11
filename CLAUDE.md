@@ -60,9 +60,13 @@ typechecks without a Claude Code install. Not our code. `.gitattributes` marks
 them `linguist-generated`. Since 2.1.287 (mods GA) the engine writes them into
 `.claude-plugin/types/` every time it loads the plugin, with its own
 `.gitignore` and `tsconfig.json`. Refresh after an
-engine update: load the plugin once (`claude -p --plugin-dir .`), then copy
-`.claude-plugin/types/<name>/index.d.ts` over `types/<name>.d.ts` for
-`claude-code`, `claude-code-tools` and `claude-code-mcp`.
+engine update: start one interactive session (`claude --plugin-dir .`), quit
+once the first line of `.claude-plugin/types/claude-code/index.d.ts` names the
+new version, then copy `.claude-plugin/types/<name>/index.d.ts` over
+`types/<name>.d.ts` for `claude-code`, `claude-code-tools` and
+`claude-code-mcp`. Not `claude -p`: since 2.1.295 the engine writes no type
+files in `-p` or SDK sessions, so a headless load leaves the old ones in place
+and looks like nothing changed. Last refreshed from 2.1.296.
 
 Mods are on by default since 2.1.287; `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` is
 no longer needed. To run Claude Code with osm OFF (an e2e control), use
