@@ -147,7 +147,7 @@ tmux new-window -t "$S" -n plugin -c "$D" \
 tmux attach -t "$S:plugin"
 ```
 
-Approve trust for this temporary folder only. Confirm the start line says 181
+Approve trust for this temporary folder only. Confirm the start line says 182
 rules. Submit these steps individually, waiting for each turn to finish:
 
 1. Ask Claude to read `negative.txt` completely, inspect no other files and reply

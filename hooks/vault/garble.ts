@@ -18,7 +18,7 @@ const pick = (set: string) => set[Math.floor(Math.random() * set.length)]!
  * the model "something was here"; a same-shaped fake tells it "this is an
  * Anthropic key", which is what keeps its reasoning intact.
  */
-export function garble(value: string, keepPrefix: number, keepInfix: readonly string[] = []): string {
+export function garble(value: string, keepPrefix: number, keepInfix: readonly { at: number; text: string }[] = []): string {
   const keep = Math.min(Math.max(keepPrefix, 0), value.length)
   let out = value.slice(0, keep)
   for (let i = keep; i < value.length; i++) {
@@ -28,11 +28,10 @@ export function garble(value: string, keepPrefix: number, keepInfix: readonly st
     else if (c >= 'A' && c <= 'Z') out += pick(UPPER)
     else out += c
   }
-  // A fake has the value's length, so an infix goes back where it was found.
-  for (const s of keepInfix) {
-    for (let i = value.indexOf(s, keep); i !== -1; i = value.indexOf(s, i + s.length)) {
-      out = out.slice(0, i) + s + out.slice(i + s.length)
-    }
+  // A fake has the value's length, so a signature goes back at its offset and
+  // nowhere else: the same text at another offset is just secret characters.
+  for (const { at, text } of keepInfix) {
+    if (at >= keep && value.startsWith(text, at)) out = out.slice(0, at) + text + out.slice(at + text.length)
   }
   return out
 }

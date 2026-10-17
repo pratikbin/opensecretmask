@@ -38,7 +38,7 @@ Everything else in this codebase is negotiable. That is not.
 | `hooks/detect/prefix.ts` | Literal-prefix extraction |
 | `hooks/detect/entropy.ts` | Shannon layer |
 | `hooks/detect/suppress.ts` | Entropy scoring; capture-group shapes live in `rules/deny.ts` |
-| `hooks/detect/rules/*.ts` | 181 patterns in six groups |
+| `hooks/detect/rules/*.ts` | 182 patterns in six groups |
 | `PATTERNS.md` | Format evidence, scanner research, corpus differences and Haiku live-test steps |
 | `hooks/policy/boundary.ts` | `outbound`/`inbound`, where `ref` is stripped |
 | `hooks/policy/model-facing.ts` | Arguments that must keep their fakes |
@@ -346,7 +346,7 @@ instead, because the engine rewrites the file.
 ## Build and test
 
 ```sh
-bun run scripts/unit-check.ts                          # 575 pure-logic checks
+bun run scripts/unit-check.ts                          # 577 pure-logic checks
 claude plugin test .                                   # 17 hook tests, real engine, no login
 bun run scripts/corpus-check.ts                        # our rules vs upstream fixtures
 bun run scripts/fetch-corpus.ts                        # refresh corpus/, needs network

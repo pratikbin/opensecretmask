@@ -8,7 +8,8 @@
 
 const R = new URL("../hooks", import.meta.url).pathname;
 const { Vault } = await import(`${R}/vault/index.ts`);
-const { scan, RULES, gatesIn } = await import(`${R}/detect/index.ts`);
+const { scan, RULES, gatesIn, SIGNATURES } = await import(`${R}/detect/index.ts`);
+const { garble } = await import(`${R}/vault/garble.ts`);
 const { literalPrefix } = await import(`${R}/detect/prefix.ts`);
 const { parseEnv, parseValue } = await import(`${R}/env.ts`);
 const { isModelFacing, RESERVED } = await import(`${R}/policy/model-facing.ts`);
@@ -928,6 +929,14 @@ console.log(`rules: ${RULES.length}\n`);
     ),
   );
 
+  hit(
+    "CR GitLab runner with an unlisted discriminator (t4_)",
+    `glrt-t4_${rnd(30)}.${rnd(9, "abcdefghijklmnopqrstuvwxyz0123456789")}`,
+  );
+  ok(
+    "CR garble keeps AZDO only at its offset",
+    !garble("a".repeat(10) + "AZDO" + "a".repeat(70), 0, SIGNATURES).includes("AZDO"),
+  );
   hit("CR GitLab PAT before .Word", `token glpat-${rnd(20)}.Done`);
   hit("CR Bearer on the next line", `Authorization:\n  Bearer ${rnd(32)}`);
 }

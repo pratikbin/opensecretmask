@@ -69,7 +69,7 @@ the gate and the fake still retain the vendor prefix.
 
 **Start with a literal prefix when the vendor has one.** `literalPrefix()` in
 `hooks/detect/prefix.ts` reads the fixed text a pattern must begin with, and
-that prefix does two jobs. It gates the scan, so 181 rules cost one prefix scan
+that prefix does two jobs. It gates the scan, so 182 rules cost one prefix scan
 instead of a separate full-text search per rule. And `garble()` keeps it verbatim, so the fake stays
 recognizable as that vendor's key. For the Anthropic rule the prefix is
 `sk-ant-`, which is why `sk-ant-` survives and `api03` becomes something else.
@@ -128,7 +128,7 @@ issue, even a revoked one.
 
 ### 5. Update the counts
 
-The rule total appears in `README.md` and in `CLAUDE.md`. Both say 181 today.
+The rule total appears in `README.md` and in `CLAUDE.md`. Both say 182 today.
 Expanded-rule fixtures live in `scripts/pattern-fixtures.ts`; `pattern-check.ts`
 checks full extraction, format, boundaries and round trips through `unit-check.ts`.
 Keep format evidence and deliberate corpus differences in `PATTERNS.md`.

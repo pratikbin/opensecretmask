@@ -72,7 +72,7 @@ A masking plugin is otherwise silent, so it reports three things.
 **At session start** — what is watched, and what is off:
 
 ```
-osm: masking (2 secrets from .env, .env.local, 181 rules, entropy on)
+osm: masking (2 secrets from .env, .env.local, 182 rules, entropy on)
 ```
 
 **Pinned under the prompt** — the round trip actually closing. `masked` counts
@@ -161,7 +161,7 @@ session's `.env` files. A value qualifies on its *name* (`*_KEY`, `*_TOKEN`,
 `PORT=3000` stays readable, and shapeless values like
 `DB_PASSWORD=zezyhd4-esvgwsw-islmz` are covered.
 
-**Detection rules — best effort.** 181 patterns in six groups under
+**Detection rules — best effort.** 182 patterns in six groups under
 `hooks/detect/rules/`, covering model providers, agent tools, cloud infrastructure,
 and developer services. Distinctive formats work in JSON, file contents and bare
 tokens; unprefixed values need explicit credential context.
@@ -370,7 +370,7 @@ invisible leak.
 No Claude Code install needed:
 
 ```sh
-bun run scripts/unit-check.ts    # 575 checks on the pure logic
+bun run scripts/unit-check.ts    # 577 checks on the pure logic
 bun run scripts/corpus-check.ts  # our rules vs gitleaks, Nosey Parker, secretlint fixtures
 npx --yes --package typescript@7 tsc -p tsconfig.json
 claude plugin validate .claude-plugin/plugin.json

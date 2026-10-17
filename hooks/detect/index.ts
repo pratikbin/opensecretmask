@@ -78,9 +78,14 @@ export function gatesIn(text: string): Set<string> {
 /**
  * Fixed text inside a credential rather than at its start, which a fake keeps
  * where it was: Azure DevOps PATs carry `AZDO` at offset 75, legacy OpenAI keys
- * `T3BlbkFJ` at offset 23. A literal prefix cannot express either.
+ * `T3BlbkFJ` at offset 23. A literal prefix cannot express either. Only the
+ * documented offset counts, so a secret that merely contains the text
+ * elsewhere keeps none of its real characters.
  */
-export const SIGNATURES = ['AZDO', 'T3BlbkFJ'] as const
+export const SIGNATURES = [
+  { at: 75, text: 'AZDO' },
+  { at: 23, text: 'T3BlbkFJ' },
+] as const
 
 /** The length of the longest rule prefix `value` begins with; 0 when none matches. */
 export function literalPrefixLen(value: string): number {
