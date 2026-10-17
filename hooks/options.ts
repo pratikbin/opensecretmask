@@ -5,7 +5,7 @@ import { DEFAULT_DETECT, type DetectConfig } from './detect'
 export type Options = {
   detect: DetectConfig
   envFiles: string[]
-  /** Carry the map across a resume or a reload. On by default: see persist.ts. */
+  /** Carry the map across a resume or a reload. Off by default: it writes literal secrets to disk. */
   persist: boolean
   /** How long a literal secret survives in the store. Env entries never expire. */
   retentionDays: number
@@ -13,7 +13,7 @@ export type Options = {
 
 const DEFAULT_ENV_FILES = ['.env', '.env.local']
 // Mirrors `userConfig` in .claude-plugin/plugin.json. Move both together.
-const DEFAULT_PERSIST = true
+const DEFAULT_PERSIST = false
 const DEFAULT_RETENTION_DAYS = 120
 
 /**

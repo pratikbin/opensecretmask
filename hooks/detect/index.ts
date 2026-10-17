@@ -42,6 +42,8 @@ const GATED: ReadonlyArray<{ rule: Rule; prefix: string; gate: string }> = RULES
   return { rule, prefix, gate: rule.re.flags.includes('i') ? '' : prefix }
 })
 
+const GATES = [...new Set(GATED.map((g) => g.gate).filter(Boolean))].sort((a, b) => b.length - a.length)
+
 /**
  * One alternation over every rule prefix, so a string is scanned once to learn
  * which rules can possibly match instead of once per rule.
@@ -49,13 +51,36 @@ const GATED: ReadonlyArray<{ rule: Rule; prefix: string; gate: string }> = RULES
  * `mask()` runs per string in a result tree, so a 1000-string tool result was
  * paying 127 full `String.includes` passes per string before a single regex
  * ran. This turns that into one pass.
+ *
+ * A lookahead, longest gate first, so it tests every position and no gate
+ * consumes text another needs. A plain alternation did: `https://` ate the
+ * start of every Slack and Discord webhook URL and `xox` the start of
+ * `xoxe-`, so those four rules never ran at all. Found by running
+ * claude-code-redact's fixtures through `scan`.
  */
 const PREFIX_GATE = new RegExp(
-  [...new Set(GATED.map((g) => g.gate).filter(Boolean))]
-    .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-    .join('|'),
+  `(?=(${GATES.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')}))`,
   'g',
 )
+
+/** Each gate with every shorter gate it starts with: those match at the same spot. */
+const GATE_PREFIXES = new Map(GATES.map((g) => [g, GATES.filter((o) => g.startsWith(o))]))
+
+/** Every gate present in `text`. */
+export function gatesIn(text: string): Set<string> {
+  const present = new Set<string>()
+  for (const m of text.matchAll(PREFIX_GATE)) {
+    for (const g of GATE_PREFIXES.get(m[1]!)!) present.add(g)
+  }
+  return present
+}
+
+/**
+ * Fixed text inside a credential rather than at its start, which a fake keeps
+ * where it was: Azure DevOps PATs carry `AZDO` at offset 75, legacy OpenAI keys
+ * `T3BlbkFJ` at offset 23. A literal prefix cannot express either.
+ */
+export const SIGNATURES = ['AZDO', 'T3BlbkFJ'] as const
 
 /** The length of the longest rule prefix `value` begins with; 0 when none matches. */
 export function literalPrefixLen(value: string): number {
@@ -74,8 +99,7 @@ export function literalPrefixLen(value: string): number {
  * value itself; `scan` passes a `Map` when it wants the attribution too.
  */
 function run(text: string, cfg: DetectConfig, into: (value: string, rule?: Rule) => void): void {
-  PREFIX_GATE.lastIndex = 0
-  const present = new Set(text.match(PREFIX_GATE) ?? [])
+  const present = gatesIn(text)
 
   for (const { rule, gate } of GATED) {
     if (gate !== '' && !present.has(gate)) continue

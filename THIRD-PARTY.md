@@ -7,8 +7,9 @@ pinned to an exact commit. The file holds their test fixtures: strings they
 assert a detector must match, and — the reason we want them — strings they
 assert it must **not**.
 
-Nothing in `hooks/` is derived from these projects. Our rules remain our own;
-only the fixtures they are measured against are theirs.
+The fixture import does not import scanner implementations. Separately adapted
+Gitleaks detection shapes are listed below; other format references are recorded
+in `docs/secret-patterns.md`.
 
 ### gitleaks — MIT
 
@@ -62,11 +63,52 @@ SOFTWARE.
 - MIT License, Copyright (c) 2020 azu. Same permission and warranty text as
   above.
 
+## Detection patterns — Gitleaks — MIT
+
+- `https://github.com/gitleaks/gitleaks`, commit `b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b`
+- Adapted format shapes: Fly.io tokens, Harness PAT/SATs, Sonar tokens, and
+  GitLab routable PAT/runner suffixes.
+- Changes: JavaScript regexes, full-value boundaries, literal-prefix-friendly
+  rules, modern Sonar prefixes matched without mandatory assignment context.
+- MIT License, Copyright (c) 2019 Zachary Rice. The permission and warranty
+  text is reproduced in the Gitleaks fixture section above.
+
 ## Detection heuristics — `hooks/detect/suppress.ts`
 
 Suppression shapes and the binary skip list adapted from
 `ray-amjad/awesome-claude-code-function-hooks` (MIT, Copyright (c) 2026 Ray
 Amjad).
+
+## Detection patterns — `karanb192/claude-code-redact` — MIT
+
+- `https://github.com/karanb192/claude-code-redact`, commit `66e80ae`
+- Adapted: the shapes of six rules in `hooks/detect/rules/` (Slack webhook,
+  Azure storage account key, the 48-character OpenAI key, the truncated
+  private key, the `Basic`/`Token` authorization schemes, AWS `ABIA`/`ACCA`),
+  and the idea of hooking `session.append`. Each adapted rule names the source
+  in a comment.
+
+```
+MIT License. Copyright (c) 2026 Karan Bansal.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ## Not used, and why
 

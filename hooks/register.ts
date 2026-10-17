@@ -1,6 +1,7 @@
 import type { On, PluginOptions } from 'claude-code'
 
 import { registerAgentSpawn } from './events/agent-spawn'
+import { registerAppend } from './events/append'
 import { registerCommand } from './events/command'
 import { registerCompact } from './events/compact'
 import { registerPrompt } from './events/prompt'
@@ -28,5 +29,6 @@ export function register(on: On, options: PluginOptions) {
   registerAgentSpawn(on, vault)
   registerPrompt(on, vault)
   registerCompact(on, vault)
+  registerAppend(on, vault)
   registerCommand(on, vault)
 }

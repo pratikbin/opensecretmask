@@ -14,7 +14,12 @@ export const gitRules: Rule[] = [
   rule('GitLab Deploy Token', 'critical', /gldt-[0-9a-zA-Z_\-]{20}/g),
   rule('GitLab SCIM Token', 'critical', /glsoat-[0-9a-zA-Z_\-]{20,}/g),
   rule('GitLab OIDC Application Secret', 'critical', /gloas-[0-9a-zA-Z_\-]{64}/g),
-  rule('GitLab Runner Authentication Token', 'critical', /glrt-[0-9a-zA-Z_\-]{20}/g),
+  // Routable tokens include a tN_ discriminator and a dot-separated suffix.
+  // One rule per discriminator, so the fake keeps `t1_` rather than `t7_`.
+  rule('GitLab Runner Authentication Token', 'critical', /glrt-t1_[0-9a-zA-Z_-]{27,300}\.[0-9a-z]{9}(?![\w-])/g),
+  rule('GitLab Runner Authentication Token', 'critical', /glrt-t2_[0-9a-zA-Z_-]{27,300}\.[0-9a-z]{9}(?![\w-])/g),
+  rule('GitLab Runner Authentication Token', 'critical', /glrt-t3_[0-9a-zA-Z_-]{27,300}\.[0-9a-z]{9}(?![\w-])/g),
+  rule('GitLab Runner Authentication Token', 'critical', /glrt-[0-9a-zA-Z_-]{20}(?![\w-])/g),
   // Group 1 keeps the cookie name out of the mask.
   rule('GitLab Session Cookie', 'high', /_gitlab_session=([0-9a-z]{32})/g, 1),
 ]

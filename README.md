@@ -72,7 +72,7 @@ A masking plugin is otherwise silent, so it reports three things.
 **At session start** — what is watched, and what is off:
 
 ```
-osm: masking (2 secrets from .env, .env.local, 146 rules, entropy on)
+osm: masking (2 secrets from .env, .env.local, 181 rules, entropy on)
 ```
 
 **Pinned under the prompt** — the round trip actually closing. `masked` counts
@@ -103,7 +103,7 @@ origin: a tool name, or `file:key` for a session-start registration.
 ## How it works
 
 Claude Code exposes mod hooks at each boundary where text moves between
-you, the model and the outside world. `osm` sits on ten of them.
+you, the model and the outside world. `osm` sits on eleven of them.
 
 ```mermaid
 flowchart LR
@@ -113,6 +113,7 @@ flowchart LR
     DISK["skill bodies"] -->|skill.prompt| MODEL
     RELAY["relay · peer<br/>Remote Control"] -->|session.receive| MODEL
     PAST["the transcript"] -->|session.compact| MODEL
+    ROWS["every stored row<br/>nested CLAUDE.md · hook context"] -->|session.append| MODEL
 
     MODEL(["Claude<br/><i>sees fakes only</i>"])
 
@@ -138,6 +139,7 @@ flowchart LR
 | `skill.prompt` | disk → model | Masks a skill's expanded prompt |
 | `session.receive` | outside → model | Masks a relay, peer or Remote Control delivery |
 | `session.compact` | transcript → model | Masks what the summarizer reads at `/compact` |
+| `session.append` | any row → model | Masks every row a conversation keeps, before it is stored and sent: the catch-all for doors the others do not name |
 | `agent.spawn` | model → model | Masks the task text handed to a subagent |
 
 One `tool.call` registration covers Read, Bash, Grep, WebFetch, Write, the
@@ -159,13 +161,13 @@ session's `.env` files. A value qualifies on its *name* (`*_KEY`, `*_TOKEN`,
 `PORT=3000` stays readable, and shapeless values like
 `DB_PASSWORD=zezyhd4-esvgwsw-islmz` are covered.
 
-**Detection rules — best effort.** 146 patterns in six groups under
-`hooks/detect/rules/`, covering about 96 vendors. No allowlists, no anchors, so
-a rule behaves the same in a JSON body, in file contents and in a bare token.
+**Detection rules — best effort.** 181 patterns in six groups under
+`hooks/detect/rules/`, covering model providers, agent tools, cloud infrastructure,
+and developer services. Distinctive formats work in JSON, file contents and bare
+tokens; unprefixed values need explicit credential context.
 
-Most rules are gated on a literal vendor prefix (`sk-ant-`, `ghp_`). Thirteen
-are shape or context rules, and those cover far more ground than a vendor count
-suggests:
+Most rules are gated on a literal vendor prefix (`sk-ant-`, `ghp_`). Seventeen
+run without a prefix gate, including shape and case-insensitive context rules:
 
 | Shape | Example |
 | --- | --- |
@@ -185,6 +187,12 @@ are usually the real key.
 A value caught once is remembered, so a secret first matched by a context rule
 is masked later when it appears on its own.
 
+The expanded rules include OpenRouter, Langfuse, Tavily, Firecrawl, E2B,
+Tailscale, SonarQube, Harness, Fly.io, Azure DevOps and Buildkite formats.
+Existing generic rules and their exclusions are unchanged. Broad new context
+matching was deferred to avoid false positives.
+See [formats, research sources, limits and live test steps](PATTERNS.md).
+
 Adding a rule is one line in one file — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Configuration
@@ -198,7 +206,7 @@ plugin key is `osm`, or `osm@inline` under `--plugin-dir`.
 | `entropyThreshold` | `4` | Bits per character above which a string counts as random |
 | `entropyMinLen` | `24` | Shortest string the entropy layer considers |
 | `envFiles` | `.env`, `.env.local` | Files the exact-match layer reads at session start |
-| `persist` | `true` | Carries the map across a resume, a fork or `/reload-plugins` |
+| `persist` | `false` | Carries the map across a resume, a fork or `/reload-plugins` |
 | `retentionDays` | `120` | How long a stored **literal** secret survives |
 
 <details>
@@ -213,7 +221,7 @@ plugin key is `osm`, or `osm@inline` under `--plugin-dir`.
         "entropyThreshold": 4.0,
         "entropyMinLen": 24,
         "envFiles": [".env", ".env.local"],
-        "persist": true,
+        "persist": false,
         "retentionDays": 120
       }
     }
@@ -284,7 +292,9 @@ that is what the model saw. Two record types still carry the real value, both
 confirmed by grepping this project's own test transcripts:
 
 - `attachment` / `hook_success` — a classic hook's stdout, verbatim. A
-  `PreToolUse` hook that echoes what it rewrote lands the credential here.
+  `PreToolUse` hook that echoes what it rewrote lands the credential here. Since
+  `session.append`, the model reads a fake of a hook's added context, but the
+  stored payload keeps the real value.
 - `queue-operation` / `enqueue` — your prompt as typed, written *before*
   `prompt.submit` runs. The model gets the fake; the disk keeps what you typed.
 
@@ -303,9 +313,10 @@ tmutil addexclusion ~/.claude/projects
 rm -f ~/.claude/plugins/store/osm_*.json
 ```
 
-**Turn `persist` off** if you want nothing of the plugin's own on disk. It ships
-on because a map that dies with the plugin load breaks `--resume`, a fork and
-`/reload-plugins`, and the usual entry is env-backed and stores no secret.
+**`persist` ships off**, so nothing of the plugin's own is on disk. Turn it on
+if `--resume`, a fork or `/reload-plugins` should keep old fakes working: a map
+that dies with the plugin load leaves them dead. Most entries are env-backed
+and store no secret, but a `literal` entry stores the value itself.
 
 **Turn on FileVault** — it protects `~/.claude` when the Mac is off or stolen,
 and does nothing while you are logged in, which is what the directory modes
@@ -359,11 +370,11 @@ invisible leak.
 No Claude Code install needed:
 
 ```sh
-bun run scripts/unit-check.ts    # 159 checks on the pure logic
+bun run scripts/unit-check.ts    # 575 checks on the pure logic
 bun run scripts/corpus-check.ts  # our rules vs gitleaks, Nosey Parker, secretlint fixtures
 npx --yes --package typescript@7 tsc -p tsconfig.json
 claude plugin validate .claude-plugin/plugin.json
-claude plugin test .              # 14 hook tests through the real engine, no login
+claude plugin test .              # 17 hook tests through the real engine, no login
 ```
 
 These cost real model calls:
@@ -373,6 +384,8 @@ bash scripts/local-e2e.sh        # 3 passes, 8 checks
 bash scripts/scenario-e2e.sh     # 11 scenarios in parallel tmux windows, 25 checks
 bash scripts/wire-e2e.sh         # what actually left the machine
 bash scripts/send-e2e.sh         # what a SendMessage recipient read
+# Haiku 5.5, positive/negative files, /osm-secrets and wire verification:
+# see PATTERNS.md (scripts/pattern-live.mjs prepares/verifies artifacts)
 ```
 
 <details>

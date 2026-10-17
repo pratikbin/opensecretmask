@@ -1,7 +1,7 @@
 {
   "name": "osm",
   "version": "0.2.0",
-  "description": "Replaces a secret with a format-preserving fake before the model reads it, and restores the real credential on the way into a tool call. The map survives a resume or a reload; set persist off to keep it in memory only.",
+  "description": "Replaces a secret with a format-preserving fake before the model reads it, and restores the real credential on the way into a tool call. The map lives in memory; turn persist on to carry it across a resume or a reload.",
   "author": {
     "name": "pratikbin"
   },
@@ -40,7 +40,7 @@
       "type": "boolean",
       "title": "Persist the map",
       "description": "Carry the fake-to-secret map across a resume, a fork or a reload. Writes a plaintext file under the Claude Code configuration directory.",
-      "default": true
+      "default": false
     },
     "retentionDays": {
       "type": "number",

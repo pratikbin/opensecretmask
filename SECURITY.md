@@ -20,7 +20,7 @@ Do not rely on osm as the only thing between a credential and a third party.
 - **A skipped hook fails open.** The engine runs core in place of a hook that
   throws or overruns its budget. osm answers for itself rather than letting the
   engine substitute, but a bug in that path serves the real value.
-- **The store is plaintext.** With `persist: true` (the default), literal
+- **The store is plaintext.** With `persist: true` (off by default), literal
   secrets are written to `~/.claude/plugins/store/osm_<key>-<hash>.json` with
   mode 644. See "Hardening this on a Mac" in the README.
 - **A classic hook downstream of osm receives the restored value**, and the

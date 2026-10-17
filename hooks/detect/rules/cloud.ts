@@ -1,13 +1,34 @@
 import { rule, type Rule } from '../rule'
 
-/** Cloud, hosting, IaC and observability credentials. */
+/** Cloud, hosting, IaC and observability credentials. See PATTERNS.md. */
 export const cloudRules: Rule[] = [
+  rule('Tailscale API Token', 'critical', /\btskey-api-[A-Za-z0-9]{10,32}-[A-Za-z0-9]{16,128}(?![\w-])/g),
+  rule('Tailscale Auth Key', 'critical', /\btskey-auth-[A-Za-z0-9]{10,32}-[A-Za-z0-9]{16,128}(?![\w-])/g),
+  rule('Tailscale OAuth Client Secret', 'critical', /\btskey-client-[A-Za-z0-9]{10,32}-[A-Za-z0-9]{16,128}(?![\w-])/g),
+  rule('Tailscale SCIM Key', 'critical', /\btskey-scim-[A-Za-z0-9]{10,32}-[A-Za-z0-9]{16,128}(?![\w-])/g),
+  rule('Tailscale Webhook Key', 'critical', /\btskey-webhook-[A-Za-z0-9]{10,32}-[A-Za-z0-9]{16,128}(?![\w-])/g),
+  rule('Fly.io OAuth Token', 'critical', /\bfo1_[A-Za-z0-9_-]{43}(?![\w-])/g),
+  rule('Fly.io Access Token', 'critical', /\bfm1a_[A-Za-z0-9+/]{100,}={0,3}(?![\w+/=-])/g),
+  rule('Fly.io Refresh Token', 'critical', /\bfm1r_[A-Za-z0-9+/]{100,}={0,3}(?![\w+/=-])/g),
+  rule('Fly.io Macaroon Token', 'critical', /\bfm2_[A-Za-z0-9+/]{100,}={0,3}(?![\w+/=-])/g),
+  // Modern PATs have an embedded signature, not a distinctive prefix. The
+  // fake keeps `AZDO` through `SIGNATURES` in detect/index.ts.
+  rule('Azure DevOps PAT', 'critical', /(?<![\w-])[A-Za-z0-9]{75}AZDO[A-Za-z0-9]{5}(?![\w-])/g),
   rule(
     'Age Secret Key',
     'critical',
     /AGE-SECRET-KEY-1[QPZRY9X8GF2TVDW0S3JN54KHCE6MUA7L]{58}/g,
   ),
   rule('Alibaba Access Key ID', 'critical', /LTAI[a-zA-Z0-9]{20}/g),
+  // A context rule: 86 base64 characters and `==` after `AccountKey=` or a
+  // storage-key name. Group 1 alone is masked, so a connection string keeps
+  // its shape. From claude-code-redact's azure-storage-key rule (MIT).
+  rule(
+    'Azure Storage Account Key',
+    'critical',
+    /(?:AccountKey|azure[_.-]?storage[_.-]?(?:account[_.-]?)?key|storage[_.-]?account[_.-]?key)["'`]?[ \t]{0,5}[=:][ \t]{0,5}["'`]?([A-Za-z0-9+/]{86}==)/gi,
+    1,
+  ),
   rule('Artifactory API Key', 'critical', /AKCp[A-Za-z0-9]{69}/g),
   rule('Cloudflare Origin CA Key', 'critical', /v1\.0-[a-f0-9]{24}-[a-f0-9]{146}/g),
   rule('Doppler Token', 'critical', /dp\.(?:pt|st|sa|ct|scim|audit)\.[a-zA-Z0-9]{40,}/g),

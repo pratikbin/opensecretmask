@@ -75,6 +75,13 @@ const spawnOf = (prompt: string) =>
 
 const START = { cwd: '/work', surface: 'terminal', isInteractive: true } as const
 
+/**
+ * A plugin's own row, as `$.session.append` takes it. The test's `$` types the
+ * call with the engine's full input; the kit sets `door`, `origin` and `uuid`.
+ */
+const noteOf = (text: string) =>
+  ({ message: { type: 'user', content: [{ type: 'text', text }] } }) as never
+
 /** The world beneath the plugin throws. */
 const broke = (): never => {
   throw new Error('the world broke')
@@ -216,7 +223,7 @@ describe('register', () => {
   // A store carrying an entry that resolves to nothing must not reach the vault.
   // This is the shape that shipped: `.env` still had the key, the key had been
   // emptied, and every later mask() cut between every character of every string.
-  test('a poisoned store restores nothing and leaves every channel alone', async ($, on) => {
+  test('a poisoned store restores nothing and leaves every channel alone', { options: { persist: true } }, async ($, on) => {
     const poisoned = {
       version: 1,
       entries: [
@@ -248,6 +255,23 @@ describe('register', () => {
 
     const up = await $.tool.call({ tool: 'Bash', command: 'echo hi' })
     expect(up.text, 'E a poisoned store leaves a tool result alone').toBe('hello world')
+  })
+
+  // Persistence writes literal secrets to disk, so it is opt-in. The same
+  // stored pair is ignored by default and restored once the option is on.
+  const stored = () => ({
+    version: 1,
+    entries: [{ kind: 'literal', fake: 'sk-ant-api03-' + 'B'.repeat(40), secret: KEY, at: Date.now() }],
+  })
+  test('the store is not read by default', async ($, on) => {
+    const { logs } = seatWorld(on, { store: { [STORE_KEY]: stored() } })
+    await $.session.start(START)
+    expect(logs[0] ?? '', 'P default start line restores nothing').not.toContain('restored')
+  })
+  test('the store is read when persist is on', { options: { persist: true } }, async ($, on) => {
+    const { logs } = seatWorld(on, { store: { [STORE_KEY]: stored() } })
+    await $.session.start(START)
+    expect(logs[0] ?? '', 'P persist on restores the stored pair').toContain('1 restored')
   })
 
   // The channels that reach the model without passing `prompt.submit`.
@@ -393,6 +417,24 @@ describe('register', () => {
     expect(reached, 'nothing was passed down').toEqual([])
   })
 
+  // Every row a conversation keeps passes `session.append`: a nested CLAUDE.md
+  // attachment, a classic hook's context, another plugin's note. The test's own
+  // `$.session.append` raises the `note` door, the one door a test can raise.
+  test('a row the session keeps is stored and sent as a fake', async ($, on) => {
+    seatWorld(on)
+    const session = mock.session(on)
+
+    const kept = await $.session.append(noteOf(`the key is ${KEY}`))
+    expect(kept.deny, 'A the row was stored, not refused').toBeUndefined()
+    const rows = session.appended()
+    expect(rows.length, 'A one row stored').toBe(1)
+    const text = (rows[0]?.message.content[0] as unknown as { text?: string } | undefined)?.text
+    expect(text, 'A stored row masked').not.toContain(KEY)
+    expect(text, 'A stored row keeps the prefix and length').toMatch(
+      new RegExp(`^the key is sk-ant-.{${KEY.length - 7}}$`),
+    )
+  })
+
   // A throw beneath the plugin must not turn into an unmasked pass. The engine
   // skips a hook that throws and runs core in its place, so a masking hook
   // carries a `.catch` that answers for it. In this runtime a hook whose
@@ -425,6 +467,7 @@ describe('register', () => {
       'session.receive',
       'session.compact',
       'session.send',
+      'session.append',
     ] as const
     for (const name of hooks) {
       on(name, broke)
@@ -477,8 +520,18 @@ describe('register', () => {
       false,
     )
 
-    // Ten hooks in all: the nine above each answered, and this is the tenth.
+    // Unlike the hooks above, a throw beneath `session.append` does not reach
+    // osm's `.catch`: the engine skips the broken hook and stores what osm
+    // passed down. What matters is the same: the row is kept as a fake.
+    const row = await $.session.append(noteOf(KEY))
+    expect(
+      JSON.stringify(row.message),
+      'X a broken hook beneath session.append does not store the real key',
+    ).not.toContain(KEY)
+    expect(row.message?.content.length, 'X the row was stored, not refused').toBe(1)
+
+    // Eleven hooks in all: the ten above each answered, and this is the eleventh.
     await $.session.start(START)
-    expect(logs.length, 'H all ten hooks registered').toBe(1)
+    expect(logs.length, 'H all eleven hooks registered').toBe(1)
   })
 })

@@ -1,7 +1,7 @@
 // What a captured value must NOT be, declared the way a rule is declared.
 //
-// 138 of the rules match a whole value: `sk-ant-…` is a credential by
-// construction and needs no second opinion. Eight match a CONTEXT and take
+// Whole-value rules treat `sk-ant-…` as a credential by construction and
+// need no second opinion. Capture-group rules match a CONTEXT and take
 // whatever follows — `SERVICE_TOKEN=(\S{8,})` cannot know what sits to its
 // right. That wildcard is the price of catching a credential with no vendor
 // shape, such as a Postgres password, and it is where every false positive

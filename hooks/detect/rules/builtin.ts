@@ -13,7 +13,7 @@ export const builtinRules: Rule[] = [
   // ever turns up as a truncated sample in documentation.
   rule('Anthropic API Key', 'critical', /sk-ant-[a-zA-Z0-9\-_]{24,}/g),
   rule('OpenAI API Key', 'critical', /sk-proj-[a-zA-Z0-9\-_]{24,}/g),
-  rule('OpenAI Service Key', 'critical', /sk-svcacct-[a-zA-Z0-9\-]{10,}/g),
+  rule('OpenAI Service Key', 'critical', /sk-svcacct-[a-zA-Z0-9_\-]{10,}/g),
   rule('Fireworks API Key', 'critical', /fw_[a-zA-Z0-9]{24,}/g),
   rule('Google API Key', 'high', /AIza[0-9A-Za-z\-_]{35}/g),
   rule('Google OAuth Client Secret', 'critical', /GOCSPX-[A-Za-z0-9_\-]{28,}/g),
@@ -21,11 +21,13 @@ export const builtinRules: Rule[] = [
   rule('Stripe Webhook Secret', 'critical', /whsec_[a-zA-Z0-9_\-]{20,}/g),
   rule('GitHub Token', 'critical', /gh[pousr]_[A-Za-z0-9_]{36,}/g),
   rule('GitHub Fine-Grained PAT', 'critical', /github_pat_[a-zA-Z0-9_]{36,}/g),
-  rule('GitLab PAT', 'critical', /glpat-[a-zA-Z0-9\-_]{20,}/g),
+  // Include the routing suffix: masking just its head leaves part of a PAT real.
+  rule('GitLab PAT', 'critical', /glpat-[a-zA-Z0-9\-_]{20,}(?:\.[a-z0-9]{9})?(?![\w-])/g),
+  // `ABIA` and `ACCA` from claude-code-redact's aws-access-key rule (MIT).
   rule(
     'AWS Access ID',
     'critical',
-    /(AKIA|A3T|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16,}/g,
+    /(AKIA|A3T|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA|ABIA|ACCA)[A-Z0-9]{16,}/g,
   ),
   rule(
     'AWS Secret Key',
@@ -66,10 +68,24 @@ export const builtinRules: Rule[] = [
   //
   // The trailing `[^\n-]{0,10}` carries PGP, whose header reads
   // `BEGIN PGP PRIVATE KEY BLOCK` and so does not end at `PRIVATE KEY`.
+  //
+  // The body cap is 64 KiB, redact's figure: a PGP keyring with subkeys runs
+  // past 20 000 characters, and above the cap no rule matches the block at all.
   rule(
     'Private Key Block',
     'critical',
-    /-----BEGIN[^\n-]{0,40}PRIVATE KEY[^\n-]{0,10}-----[\s\S]{0,20000}?-----END[^\n-]{0,40}PRIVATE KEY[^\n-]{0,10}-----/g,
+    /-----BEGIN[^\n-]{0,40}PRIVATE KEY[^\n-]{0,10}-----[\s\S]{0,65536}?-----END[^\n-]{0,40}PRIVATE KEY[^\n-]{0,10}-----/g,
+  ),
+  // A key cut off before its END line: `head -4 id_rsa`, a log that truncates,
+  // a service-account JSON with `\n` escapes. The trailing lookahead refuses
+  // when another key line or the END marker follows (past a PGP `=XXXX`
+  // checksum line), so a whole block is left to the rule above instead of
+  // being matched twice. From
+  // claude-code-redact's private-key-truncated rule (MIT).
+  rule(
+    'Private Key (truncated)',
+    'critical',
+    /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?-----[ \t]{0,16}(?:(?:\r?\n|\\r\\n|\\n)[ \t]{0,16}[A-Za-z][A-Za-z0-9-]{0,63}:[ \t][^\r\n\\]{0,256}){0,8}(?:(?:\r?\n|\\r\\n|\\n)[ \t]{0,16}(?=\r?\n|\\r\\n|\\n))?(?:(?:\r?\n|\\r\\n|\\n)[ \t]{0,16}[A-Za-z0-9+/=]{16,128}){2,2048}(?![A-Za-z0-9+/=])(?!(?:\r?\n|\\r\\n|\\n)[ \t]{0,16}(?:(?:=[A-Za-z0-9+/]{4}(?:\r?\n|\\r\\n|\\n)[ \t]{0,16})?-----END|[A-Za-z0-9+/=]{16,128}(?![A-Za-z0-9+/=])))/g,
   ),
   rule('JWT Token', 'high', /(ey[a-zA-Z0-9_\-=]{10,}\.){2}[a-zA-Z0-9_\-=]{10,}/g),
   rule('Extended Private Key', 'critical', /[xyzt]prv[1-9A-HJ-NP-Za-km-z]{107,108}/g),
@@ -90,15 +106,24 @@ export const builtinRules: Rule[] = [
   ),
   // The password inside a connection string: postgres://user:PASSWORD@host.
   // Group 2 alone is masked, so the DSN stays a valid DSN.
+  // The user may be empty, as in `redis://:PASSWORD@host`; claude-code-redact's
+  // fixtures caught that gap.
   rule(
     'Connection String Password',
     'critical',
-    /\b[a-z][a-z0-9+.-]{1,20}:\/\/[^\s/@:]{1,80}:([^\s/@]{3,200})@/gi,
+    /\b[a-z][a-z0-9+.-]{1,20}:\/\/[^\s/@:]{0,80}:([^\s/@]{3,200})@/gi,
     1,
   ),
-  // `Authorization: Bearer <token>`, whatever vendor minted the token. Group 1
-  // alone is masked, so the header keeps its shape.
-  rule('Bearer Token Header', 'high', /Authorization:\s*Bearer\s+([A-Za-z0-9._~+/=-]{16,})/gi, 1),
+  // `Authorization: Bearer <token>`, whatever vendor minted the token, and the
+  // `Basic` and `Token` schemes beside it, bare or as a quoted JSON key. Group
+  // 1 alone is masked, so the header keeps its shape. Widened from
+  // claude-code-redact's auth-header rule (MIT).
+  rule(
+    'Authorization Header',
+    'high',
+    /Authorization["']?\s*[:=]\s*["']?(?:Bearer|Basic|Token)[ \t]+([A-Za-z0-9._~+/=-]{8,})/gi,
+    1,
+  ),
   rule('Twilio Account SID', 'medium', /AC[a-f0-9]{32}/g),
   rule(
     'Environment Variable Secret',

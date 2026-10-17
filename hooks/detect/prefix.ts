@@ -11,7 +11,9 @@ const META = new Set(['[', '(', ')', '{', '}', '?', '*', '+', '|', '^', '$', '.'
  */
 export function literalPrefix(source: string): string {
   let out = ''
-  for (let i = 0; i < source.length; i++) {
+  // A leading word boundary consumes nothing; the literal still gates the
+  // rule and must survive in the fake (for example, Tailscale's tskey-api-).
+  for (let i = source.startsWith('\\b') ? 2 : 0; i < source.length; i++) {
     const c = source[i]!
     if (c === '\\') {
       const escaped = source[i + 1]

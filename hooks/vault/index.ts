@@ -1,4 +1,4 @@
-import { literalPrefixLen, scan, DEFAULT_DETECT, type DetectConfig } from '../detect'
+import { literalPrefixLen, scan, SIGNATURES, DEFAULT_DETECT, type DetectConfig } from '../detect'
 import { MIN_SECRET_LEN } from '../env'
 
 import { garble } from './garble'
@@ -194,7 +194,7 @@ export class Vault {
     const keep = literalPrefixLen(secret)
     let fake = ''
     for (let i = 0; i < GARBLE_TRIES; i++) {
-      const candidate = garble(secret, keep)
+      const candidate = garble(secret, keep, SIGNATURES)
       if (
         candidate !== secret &&
         !this.#byMask.has(candidate) &&

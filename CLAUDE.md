@@ -20,24 +20,26 @@ Everything else in this codebase is negotiable. That is not.
 
 | Path | Owns |
 | --- | --- |
-| `hooks/register.ts` | Wiring. One `Vault`, six `register*` calls. No logic. |
+| `hooks/register.ts` | Wiring. One `Vault`, seven `register*` calls. No logic. |
 | `hooks/options.ts` | `PluginOptions` → typed `Options` |
 | `hooks/env.ts` | `.env` parsing, comment- and quote-aware |
 | `hooks/events/session-start.ts` | `.env` registration + persistence restore |
 | `hooks/events/tool-call.ts` | The round trip, both directions |
 | `hooks/events/prompt.ts` | The five channels that carry a prompt to the model |
 | `hooks/events/compact.ts` | `session.compact`, what the summarizer reads |
+| `hooks/events/append.ts` | `session.append`, every row a conversation keeps |
 | `hooks/events/agent-spawn.ts` | `agent.spawn` and `session.send`, the other-model boundary |
 | `hooks/events/command.ts` | `/osm-secrets`: one bounded `real → fake` line per secret |
 | `hooks/vault/index.ts` | The two-way map, and the ledger behind `/osm-secrets` |
 | `hooks/vault/garble.ts` | The format-preserving fake |
 | `hooks/vault/walk.ts` | Bounded deep traversal, binary-safe |
-| `hooks/vault/persist.ts` | `$.store` backing, on by default via the manifest; reconciles rather than overwrites |
+| `hooks/vault/persist.ts` | `$.store` backing, off by default since 2026-10-13; reconciles rather than overwrites |
 | `hooks/detect/index.ts` | The scanner |
 | `hooks/detect/prefix.ts` | Literal-prefix extraction |
 | `hooks/detect/entropy.ts` | Shannon layer |
 | `hooks/detect/suppress.ts` | Entropy scoring; capture-group shapes live in `rules/deny.ts` |
-| `hooks/detect/rules/*.ts` | 146 patterns in six groups |
+| `hooks/detect/rules/*.ts` | 181 patterns in six groups |
+| `PATTERNS.md` | Format evidence, scanner research, corpus differences and Haiku live-test steps |
 | `hooks/policy/boundary.ts` | `outbound`/`inbound`, where `ref` is stripped |
 | `hooks/policy/model-facing.ts` | Arguments that must keep their fakes |
 | `hooks/policy/budget.ts` | Failure fallbacks |
@@ -50,8 +52,8 @@ Everything else in this codebase is negotiable. That is not.
 
 Adding a rule source is one file in `rules/` plus one line in `rules/index.ts`.
 No registry, no init-time side effects. Excluding a shape is one line in
-`rules/deny.ts`, which is the same directory on purpose: 138 rules match a
-whole value and need no exclusions, but eight match a context and take
+`rules/deny.ts`, which is the same directory on purpose: 172 rules match a
+whole value and need no exclusions, but nine match a context and take
 whatever follows, and what that wildcard must refuse is a property of the
 rules, not a heuristic hidden elsewhere.
 
@@ -112,6 +114,22 @@ durable. Rewriting a message means surrendering its `handle` — the engine
 stands its own copy whole for a message that keeps one — so only the messages
 that actually change give it up.
 
+**A classic hook's context is a row, not a tool result.** A SessionStart or
+UserPromptSubmit hook's `additionalContext` reaches the model by door
+`hook-context` of `session.append`, which none of the named hooks see.
+`scripts/append-e2e.sh` showed it on the wire: before `append.ts`, both
+canaries reached the model with osm loaded, 11 request bodies each. Now
+none do, and a same-shaped fake does. `session.append` sees every row a
+conversation keeps, so it is also the catch-all for any door not yet named.
+Two limits: an attachment's payload is "stored as made", so the transcript
+file still holds the real value (same run: the canary stayed on disk), and
+the engine skips a broken hook beneath `session.append` instead of raising
+into our `.catch`, so that `.catch` is validated but never executed in a test.
+A row cannot be refused, so the fallback stores a notice in place of the text.
+Idea taken from `karanb192/claude-code-redact`, which hooks this event alone.
+A nested `sub/CLAUDE.md` never reached the wire in `-p` even without a
+plugin, so that door is untested.
+
 **`claudeMd` rides in `prompt.context`, not `prompt.section`.** Instruction
 files land in `prompt.context.blocks` under the name `claudeMd`.
 `prompt.section` carries `memory` and friends. Both are needed; hooking only
@@ -152,6 +170,19 @@ matches run through `trimCapture` and `isPlaceholder`, and both the raw and the
 trimmed form are tested, because trimming removes the very brackets that make a
 reference recognisable. Plain hex and digit runs are deliberately NOT
 suppressed there: under an explicit credential name they are usually real.
+
+**A prefix gate must see every prefix, not the first one to match.** The
+scanner learns which rules can fire from one regex over every rule's literal
+prefix. Written as a plain alternation, it consumed text: `https://` matched
+first at the start of every Slack or Discord webhook URL, so the gate never
+recorded `https://hooks.slack.com/services/T` or `https://discord`, and `xox`
+hid `xoxe-` the same way. Four rules never ran from 2026-09-16 (`7b36dfe`) to
+2026-10-13. Any of those webhooks or tokens that a `.env` file did not
+register reached the model as is. No check caught it, because every hit check fed a rule its own value with
+nothing in front of it. The gate is now a lookahead tried at every position,
+longest prefix first, and each found prefix also marks the shorter prefixes it
+starts with. `GATE` in `unit-check.ts` asserts every prefix is found in text.
+Found by running `karanb192/claude-code-redact`'s fixtures through `scan`.
 
 **A label re-derived after the fact is a guess, not a record.** `mask()` used
 to learn a new secret's rule name by re-scanning the bare captured value on
@@ -244,7 +275,9 @@ through `load()` — could not be caught at the hook layer however many checks
 were added. Now that `options.ts` mirrors the manifest, `{}` *is* the shipped
 configuration. Since 2.1.287 the hook tests run under `claude plugin test`,
 where the engine loads the plugin from its manifest, so they get the shipped
-options by construction.
+options by construction. Since `persist` ships off, a test that needs the store
+read says so with `{ options: { persist: true } }`; a store test without it
+passes because the store is never read.
 
 **`agentId` is camelCase.** The classic-hook spelling `agent_id` reads
 `undefined`.
@@ -298,7 +331,8 @@ Module memory, one load of the plugin.
 recognise it, and the tool gets the fake. The command fails against an invalid
 credential. No secret leaks — safe for privacy, wrong for usability.
 
-`persist: true` fixes it via `$.store`, with a deliberate split: an `env` entry
+`persist: true` (off by default since 2026-10-13, because a `literal` entry
+puts a secret at rest in plaintext) fixes it via `$.store`, with a deliberate split: an `env` entry
 stores only `{fake, file, key}` plus how it was first found, and never expires, because the secret is
 already in `.env` and gets re-read. A `literal` entry stores the value itself
 and expires after `retentionDays` (default 120). Only `literal` puts a
@@ -312,8 +346,8 @@ instead, because the engine rewrites the file.
 ## Build and test
 
 ```sh
-bun run scripts/unit-check.ts                          # 159 pure-logic checks
-claude plugin test .                                   # 14 hook tests, real engine, no login
+bun run scripts/unit-check.ts                          # 575 pure-logic checks
+claude plugin test .                                   # 17 hook tests, real engine, no login
 bun run scripts/corpus-check.ts                        # our rules vs upstream fixtures
 bun run scripts/fetch-corpus.ts                        # refresh corpus/, needs network
 npx --yes --package typescript@7 tsc -p tsconfig.json  # NB: --package, see below
@@ -321,6 +355,7 @@ bash scripts/local-e2e.sh                              # real model, 3 passes
 bash scripts/scenario-e2e.sh                           # 11 scenarios in tmux, 25 checks
 bash scripts/sandbox-e2e.sh                            # real model, throwaway box
 bash scripts/wire-e2e.sh                               # what actually left the machine
+bash scripts/append-e2e.sh                             # the doors that are not tool results
 bash scripts/send-e2e.sh                               # SendMessage to a session without osm
 ```
 
@@ -338,6 +373,12 @@ engine skipped the hook and served the real result. `validate` and `noload`
 need no model and catch the failure with no symptom, where the module is
 rejected, no hook loads, and every other scenario quietly reports the
 control's answer.
+
+The expanded-pattern live test uses `scripts/pattern-live.mjs` to prepare 31
+fabricated credentials and 47 harmless lookalikes. The procedure in
+`PATTERNS.md` drives Claude Haiku 5.5 in tmux, checks `/osm-secrets`
+after each file, and verifies the recorder's bodies plus a local grep round
+trip. It runs locally with persistence off; it needs no sandbox service.
 
 **In-process checks cannot answer "did it leave masked".** Every unit and hook
 check asserts that our hook *returned* a fake. None can show the
@@ -388,8 +429,9 @@ Five things make a runner look broken when it is not.
   in a normal file for the model to read.
 - `--plugin-dir` takes the directory holding `.claude-plugin`. From inside the
   clone that is `.`.
-- A run writes its fixture credentials into the real host store, because
-  `persist` is on by default and `$.store` is per-plugin, not per-fixture. The
+- With `persist` on, a run writes its fixture credentials into the real host
+  store, because `$.store` is per-plugin, not per-fixture. It shipped on until
+  2026-10-13, so an older machine's store already holds them. The
   store on a machine that has run the matrix is mostly dead scenario keys, and
   anything registered there keeps being masked in later sessions.
 
@@ -412,7 +454,9 @@ Five things make a runner look broken when it is not.
   off, since agent prompts carry user data on purpose.
 - A classic hook downstream of us receives the restored value, and the engine
   writes its stdout verbatim into the transcript JSONL. Observed with a
-  `PreToolUse` rewriter. Nothing the plugin can do from inside.
+  `PreToolUse` rewriter. What the model reads of a hook's context is now
+  masked by `session.append`; the stored payload is not, and nothing the
+  plugin can do from inside reaches it.
 - A developer's store fills with values this repository's own test runs
   produced: scenario fixtures, corpus strings, and any credential-shaped
   literal that passed through a tool result. They keep being masked in
@@ -423,3 +467,9 @@ Five things make a runner look broken when it is not.
 
 Suppression shapes and the binary skip list adapted from
 `ray-amjad/awesome-claude-code-function-hooks` (MIT).
+
+The `session.append` hook's idea, and six patterns (Slack webhook, Azure
+storage key, the 48-character OpenAI key, the truncated private key, the
+`Basic`/`Token` authorization schemes, AWS `ABIA`/`ACCA`), adapted from
+`karanb192/claude-code-redact` (MIT). Its rule fixtures also exposed the
+prefix-gate bug fixed in `detect/index.ts`.

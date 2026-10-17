@@ -3,11 +3,21 @@ import { rule, type Rule } from '../rule'
 /**
  * Developer-tool, SaaS and fintech credentials.
  *
- * Vendors whose tokens need keyword context are deliberately absent: Snyk's
- * bare UUID, Sonar's plain alphanumeric, Twitter and Plaid. Without an
- * allowlist engine they would fire on routine prompt text.
+ * Unprefixed tokens (Snyk UUIDs, legacy Sonar, Twitter, Plaid, …) need
+ * credential context. Modern Sonar tokens have their own prefixes below.
+ * Format sources are listed in PATTERNS.md.
  */
 export const devtoolsRules: Rule[] = [
+  rule('SonarQube User Token', 'critical', /\bsqu_[a-f0-9]{40}(?![\w-])/g),
+  rule('SonarQube Project Token', 'critical', /\bsqp_[a-f0-9]{40}(?![\w-])/g),
+  rule('SonarQube Global Token', 'critical', /\bsqa_[a-f0-9]{40}(?![\w-])/g),
+  rule('Harness Personal Token', 'critical', /\bpat\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9]{24}\.[A-Za-z0-9]{20}(?![\w-]|\.[A-Za-z0-9])/g),
+  rule('Harness Service Token', 'critical', /\bsat\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9]{24}\.[A-Za-z0-9]{20}(?![\w-]|\.[A-Za-z0-9])/g),
+  rule('Buildkite Cluster Token', 'critical', /\bbkct_[A-Za-z0-9_-]{24,128}(?![\w-])/g),
+  rule('Buildkite Registration Token', 'critical', /\bbkar_[A-Za-z0-9_-]{24,128}(?![\w-])/g),
+  rule('Buildkite Agent Session Token', 'critical', /\bbkaa_[A-Za-z0-9_-]{24,128}(?![\w-])/g),
+  rule('Buildkite Agent Job Token', 'critical', /\bbkaj_[A-Za-z0-9_.-]{23,2047}[A-Za-z0-9_-](?![\w-]|\.[A-Za-z0-9])/g),
+  rule('Buildkite Job Acquisition Token', 'critical', /\bbkjat_[A-Za-z0-9_.-]{23,2047}[A-Za-z0-9_-](?![\w-]|\.[A-Za-z0-9])/g),
   rule('PlanetScale API Token', 'critical', /pscale_tkn_[\w=\.\-]{32,64}/g),
   rule('PlanetScale OAuth Token', 'critical', /pscale_oauth_[\w=\.\-]{32,64}/g),
   rule('PlanetScale Password', 'critical', /pscale_pw_[\w=\.\-]{32,64}/g),
