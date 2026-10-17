@@ -346,7 +346,7 @@ instead, because the engine rewrites the file.
 ## Build and test
 
 ```sh
-bun run scripts/unit-check.ts                          # 577 pure-logic checks
+bun run scripts/unit-check.ts                          # 579 pure-logic checks
 claude plugin test .                                   # 17 hook tests, real engine, no login
 bun run scripts/corpus-check.ts                        # our rules vs upstream fixtures
 bun run scripts/fetch-corpus.ts                        # refresh corpus/, needs network

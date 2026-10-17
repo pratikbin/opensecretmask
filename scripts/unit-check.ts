@@ -929,6 +929,20 @@ console.log(`rules: ${RULES.length}\n`);
     ),
   );
 
+  {
+    const body = (n: number) =>
+      rnd(n, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/");
+    const key = (b: string) => `-----BEGIN PRIVATE KEY-----\n${b}\n-----END PRIVATE KEY-----`;
+    const bodies = [body(120), body(120)];
+    const two = new Vault().mask(bodies.map((b) => key(b)).join("\n"));
+    ok(
+      "CR two adjacent private keys are both masked",
+      bodies.every((b) => !two.includes(b)),
+    );
+    const start = performance.now();
+    scan("-----BEGIN PRIVATE KEY-----\n".repeat(100_000));
+    ok("CR 100k unclosed key headers scan in under 2 s", performance.now() - start < 2000);
+  }
   hit(
     "CR GitLab runner with an unlisted discriminator (t4_)",
     `glrt-t4_${rnd(30)}.${rnd(9, "abcdefghijklmnopqrstuvwxyz0123456789")}`,

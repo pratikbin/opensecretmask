@@ -71,10 +71,14 @@ export const builtinRules: Rule[] = [
   //
   // The body cap is 64 KiB, redact's figure: a PGP keyring with subkeys runs
   // past 20 000 characters, and above the cap no rule matches the block at all.
+  //
+  // The body stops at the next `-----BEGIN`. Without that, every unclosed
+  // header re-scanned up to 64 KiB, so a string of N headers and no END cost
+  // N x 64 KiB: seconds in a hook that runs synchronously.
   rule(
     'Private Key Block',
     'critical',
-    /-----BEGIN[^\n-]{0,40}PRIVATE KEY[^\n-]{0,10}-----[\s\S]{0,65536}?-----END[^\n-]{0,40}PRIVATE KEY[^\n-]{0,10}-----/g,
+    /-----BEGIN[^\n-]{0,40}PRIVATE KEY[^\n-]{0,10}-----(?:(?!-----BEGIN)[\s\S]){0,65536}?-----END[^\n-]{0,40}PRIVATE KEY[^\n-]{0,10}-----/g,
   ),
   // A key cut off before its END line: `head -4 id_rsa`, a log that truncates,
   // a service-account JSON with `\n` escapes. The trailing lookahead refuses

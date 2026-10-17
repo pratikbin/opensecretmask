@@ -370,7 +370,7 @@ invisible leak.
 No Claude Code install needed:
 
 ```sh
-bun run scripts/unit-check.ts    # 577 checks on the pure logic
+bun run scripts/unit-check.ts    # 579 checks on the pure logic
 bun run scripts/corpus-check.ts  # our rules vs gitleaks, Nosey Parker, secretlint fixtures
 npx --yes --package typescript@7 tsc -p tsconfig.json
 claude plugin validate .claude-plugin/plugin.json
